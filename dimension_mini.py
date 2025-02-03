@@ -16,6 +16,9 @@ pyautogui.FAILSAFE = False
 class Stats:
     dimension_boosts = 0
     antimatters = 0
+    max_ticks = 0
+    antimatter_available = 1  # Counter for available antimatter detections
+    dimension_boosts_available = 22  # Counter for available dimension boosts
 
 # ANSI color codes
 class Colors:
@@ -48,7 +51,10 @@ def print_stats():
     with print_lock:
         print(f"\r{Colors.BLUE}Stats:{Colors.ENDC} ", end='')
         print(f"Dimension Boosts: {Colors.GREEN}{Stats.dimension_boosts}{Colors.ENDC} | ", end='')
-        print(f"Antimatters: {Colors.YELLOW}{Stats.antimatters}{Colors.ENDC}", end='    \n')
+        print(f"Boosts Available: {Colors.GREEN if Stats.dimension_boosts_available > 0 else Colors.RED}{Stats.dimension_boosts_available}{Colors.ENDC} | ", end='')
+        print(f"Antimatters: {Colors.YELLOW}{Stats.antimatters}{Colors.ENDC} | ", end='')
+        print(f"Max Ticks: {Colors.BLUE}{Stats.max_ticks}{Colors.ENDC} | ", end='')
+        print(f"Antimatter Available: {Colors.GREEN if Stats.antimatter_available > 0 else Colors.RED}{Stats.antimatter_available}{Colors.ENDC}", end='    \n')
 
 def print_colored(text, r, g, b):
     # Print text with its own color as background
@@ -70,16 +76,32 @@ def handle_click(coord, name):
     current_time = time.time()
     
     if name == "Antimatter Galaxies":
+        if Stats.antimatter_available <= 0:
+            print_log(f"Skipping Antimatter Galaxies - no detections available until next Big Crunch", Colors.YELLOW, "SKIP")
+            cooldowns[name] = current_time + 1  # Set cooldown anyway
+            return
+        print_log(f"Antimatter Galaxies clicked (Detections remaining: {Stats.antimatter_available - 1})", Colors.YELLOW, "CLICK")
         Stats.antimatters += 1
-        cooldowns[name] = current_time + 15  # 15 second cooldown
-        print_log(f"Antimatter Galaxies clicked", Colors.YELLOW, "CLICK")
+        cooldowns[name] = current_time + 1  # 1 second cooldown
+        Stats.antimatter_available -= 1
     elif name == "Dimension Boost":
+        if Stats.dimension_boosts_available <= 0:
+            print_log(f"Skipping Dimension Boost - no boosts available until next Big Crunch", Colors.YELLOW, "SKIP")
+            cooldowns[name] = current_time + 1  # Set cooldown anyway
+            return
+        print_log(f"Dimension Boost clicked (Boosts remaining: {Stats.dimension_boosts_available - 1})", Colors.YELLOW, "CLICK")
         Stats.dimension_boosts += 1
-        cooldowns[name] = current_time + 15  # 15 second cooldown
-        print_log(f"Dimension Boost clicked", Colors.YELLOW, "CLICK")
+        Stats.dimension_boosts_available -= 1
+        cooldowns[name] = current_time + 1  # 1 second cooldown
     elif name == "Big Crunch":
-        cooldowns[name] = current_time + 15  # 15 second cooldown
-        print_log(f"Big Crunch clicked", Colors.YELLOW, "CRUNCH")
+        Stats.antimatter_available = 1  # Reset antimatter detection counter
+        Stats.dimension_boosts_available = 22  # Reset dimension boosts counter
+        cooldowns[name] = current_time + 1  # 1 second cooldown
+        print_log(f"Big Crunch clicked - Antimatter detections reset to {Stats.antimatter_available}, Dimension Boosts reset to {Stats.dimension_boosts_available}", Colors.YELLOW, "CRUNCH")
+    elif name == "Max Ticks":
+        Stats.max_ticks += 1
+        cooldowns[name] = current_time + 1.5  # 1.5 second cooldown
+        print_log(f"Max Ticks upgrade clicked", Colors.YELLOW, "UPGRADE")
     
     # Click immediately
     pyautogui.click(coord["pos"][0], coord["pos"][1])
@@ -94,7 +116,8 @@ def monitor_and_click():
     COORDINATES = [
         {"pos": (2076, 908), "name": "Antimatter Galaxies", "color": TARGET_COLOR},  # Check first
         {"pos": (860, 909), "name": "Dimension Boost", "color": TARGET_COLOR},   # Check second
-        {"pos": (1512, 111), "name": "Big Crunch", "color": CRUNCH_COLOR}  # Check last
+        {"pos": (1512, 111), "name": "Big Crunch", "color": CRUNCH_COLOR},  # Check third
+        {"pos": (1546, 328), "name": "Max Ticks", "color": TARGET_COLOR}  # Check last
     ]
     active_threads = []
 
@@ -118,8 +141,9 @@ def monitor_and_click():
                 x, y = coord["pos"]
                 current_color = get_pixel_color(x, y)
                 
-                # Skip if in cooldown
-                if coord["name"] in cooldowns and time.time() < cooldowns[coord["name"]]:
+                # Skip if in cooldown or if Antimatter with no detections available
+                if (coord["name"] in cooldowns and time.time() < cooldowns[coord["name"]]) or \
+                   (coord["name"] == "Antimatter Galaxies" and Stats.antimatter_available <= 0):
                     print_colored("□ ", current_color[0], current_color[1], current_color[2])
                     continue
                     
@@ -136,7 +160,7 @@ def monitor_and_click():
                     active_threads.append(click_thread)
                     
                     # If Antimatter Galaxies is clicked, break the loop to skip remaining checks
-                    if coord["name"] == "Antimatter Galaxies":
+                    if coord["name"] == "Antimatter Galaxies" and Stats.antimatter_available > 0:
                         break
             
             # Wait before next check
