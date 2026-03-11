@@ -1,0 +1,57 @@
+name: antimatter_dimensions
+game: Antimatter Dimensions
+resolution: [3840, 2160]
+poll_interval: 0.5
+color_tolerance: 3
+
+buttons:
+  - name: Antimatter Galaxies
+    x: 2076
+    y: 908
+    color: [103, 196, 90]
+    action: click
+    cooldown: 1.0
+
+  - name: Dimension Boost
+    x: 860
+    y: 909
+    color: [103, 196, 90]
+    action: click
+    cooldown: 1.0
+
+  - name: Big Crunch
+    x: 1512
+    y: 111
+    color: [51, 127, 182]
+    action: click
+    cooldown: 1.0
+
+  - name: Max Ticks
+    x: 1546
+    y: 328
+    color: [103, 196, 90]
+    action: click
+    cooldown: 1.5
+
+states:
+  - name: farming
+    monitor_buttons:
+      - Antimatter Galaxies
+      - Dimension Boost
+      - Big Crunch
+      - Max Ticks
+    transitions:
+      Big Crunch: crunching
+    max_actions:
+      Antimatter Galaxies: 1
+      Dimension Boost: 22
+
+  - name: crunching
+    monitor_buttons:
+      - Big Crunch
+    transitions:
+      Big Crunch: farming
+
+ocr_regions:
+  antimatter_count: [700, 50, 400, 40]
+  dimension_multiplier: [500, 200, 200, 30]

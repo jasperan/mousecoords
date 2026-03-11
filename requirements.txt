@@ -1,2 +1,17 @@
-keyboard
-pyautogui
+# Core
+keyboard>=0.13
+pyautogui>=0.9
+pyyaml>=6.0
+
+# Computer Vision (optional — enables template matching)
+opencv-python>=4.5
+numpy>=1.20
+
+# OCR (optional — enables text/number reading from screen)
+pytesseract>=0.3
+
+# Macro Recording (optional — enables record/replay)
+pynput>=1.7
+
+# Rich TUI (optional — enables live dashboard)
+rich>=13.0
