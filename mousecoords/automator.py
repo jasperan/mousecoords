@@ -1,50 +1,36 @@
-"""Main automation orchestrator and CLI entry point.
+"""Command implementations for mousecoords.
 
-Ties together config, vision, state machine, TUI, overlay, recorder,
-and OCR into a unified command-line interface.
-
-Usage:
-    mousecoords coords          # grab mouse coordinates
-    mousecoords automate        # run game automation
-    mousecoords record          # record a macro
-    mousecoords play FILE       # play back a macro
-    mousecoords capture         # capture a button template
-    mousecoords profile list    # manage profiles
-    mousecoords ocr             # read text from screen region
+This module deliberately keeps desktop-only imports inside command
+functions so the package can be imported in headless environments.
 """
 
 from __future__ import annotations
 
-import argparse
-import sys
 import time
 from pathlib import Path
 from threading import Thread
 
-import pyautogui
 
-from .config import (
-    load_profile, save_profile, get_default_profile,
-    list_profiles, get_profiles_dir,
-)
-from .vision import VisionEngine
-from .state_machine import StateMachine, GamePhase
-from .tui import Dashboard, HAS_RICH
-from .recorder import MacroRecorder
+def _get_pyautogui():
+    import pyautogui
 
-# Disable pyautogui safety features for automation
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE = 0
+    pyautogui.FAILSAFE = False
+    pyautogui.PAUSE = 0
+    return pyautogui
 
 
 # ======================================================================
 # Commands
 # ======================================================================
 
+
 def cmd_coords(args):
     """Enhanced coordinate grabber with color readout."""
     import keyboard
 
+    from .vision import VisionEngine
+
+    pyautogui = _get_pyautogui()
     vision = VisionEngine()
     print("mousecoords v2.0 -- Coordinate Grabber")
     print("Press SPACE to capture coordinates, Q to quit")
@@ -62,11 +48,19 @@ def cmd_coords(args):
             print(f"  ({x:>5}, {y:>5})  RGB{color}")
 
     print("Done.")
+    return 0
 
 
-def cmd_automate(args):
+
+def cmd_run(args):
     """Run game automation with vision, state machine, and TUI."""
-    # Load profile
+    from .config import get_default_profile, get_profiles_dir, load_profile
+    from .state_machine import StateMachine
+    from .tui import Dashboard, HAS_RICH
+    from .vision import VisionEngine
+
+    pyautogui = _get_pyautogui()
+
     if args.profile:
         profile_path = args.profile
         if not Path(profile_path).exists():
@@ -78,12 +72,9 @@ def cmd_automate(args):
     vision = VisionEngine(color_tolerance=profile.color_tolerance)
     sm = StateMachine(profile)
 
-    # --- Dashboard setup ---
     dashboard = None
     if HAS_RICH and not args.simple:
-        dashboard = Dashboard(
-            title=f"mousecoords -- {profile.game or profile.name}",
-        )
+        dashboard = Dashboard(title=f"mousecoords -- {profile.game or profile.name}")
         dashboard.set_mode("Game Automation")
 
     def on_transition(old, new, trigger):
@@ -102,36 +93,35 @@ def cmd_automate(args):
     sm.on_transition(on_transition)
     sm.on_action(on_action)
 
-    # --- Overlay (optional) ---
     overlay = None
     if args.overlay:
         try:
             from .overlay import Overlay
+
             overlay = Overlay()
             overlay.start()
             for btn in profile.buttons:
                 overlay.add_marker(btn.name, btn.x, btn.y)
-        except Exception as e:
-            msg = f"Overlay unavailable: {e}"
+        except Exception as exc:
+            msg = f"Overlay unavailable: {exc}"
             if dashboard:
                 dashboard.log_warning(msg)
             else:
                 print(f"[WARN] {msg}")
 
-    # --- OCR thread (optional) ---
     ocr_data: dict = {}
     if args.ocr and profile.ocr_regions:
+
         def ocr_loop():
             while True:
                 for name, region in profile.ocr_regions.items():
                     val = vision.read_number(region)
                     if val is not None:
                         ocr_data[name] = val
-                time.sleep(2)  # OCR is expensive, poll slowly
+                time.sleep(2)
 
         Thread(target=ocr_loop, daemon=True).start()
 
-    # --- Main automation loop ---
     def automation_loop():
         while True:
             try:
@@ -144,7 +134,6 @@ def cmd_automate(args):
                             dashboard.set_button_status(btn.name, status)
                         continue
 
-                    # Detect button: template matching or color check
                     detected = False
                     click_x, click_y = btn.x, btn.y
 
@@ -154,9 +143,7 @@ def cmd_automate(args):
                             detected = True
                             click_x, click_y = center
                     else:
-                        detected = vision.find_button_by_color(
-                            btn.x, btn.y, btn.color,
-                        )
+                        detected = vision.find_button_by_color(btn.x, btn.y, btn.color)
 
                     if detected:
                         if dashboard:
@@ -164,18 +151,16 @@ def cmd_automate(args):
                         pyautogui.click(click_x, click_y)
                         sm.record_action(btn.name)
 
-                        # Priority: after clicking galaxies, skip rest
                         if btn.name == "Antimatter Galaxies":
                             break
                     else:
                         if dashboard:
                             dashboard.set_button_status(btn.name, "ready")
 
-                # Merge OCR data into stats display
                 stats = sm.stats.to_dict()
                 if ocr_data:
-                    for k, v in ocr_data.items():
-                        stats[f"OCR:{k}"] = f"{v:,.0f}"
+                    for key, value in ocr_data.items():
+                        stats[f"OCR:{key}"] = f"{value:,.0f}"
 
                 if dashboard:
                     dashboard.update_stats(stats)
@@ -185,19 +170,20 @@ def cmd_automate(args):
 
             except KeyboardInterrupt:
                 break
-            except Exception as e:
+            except Exception as exc:
                 if dashboard:
-                    dashboard.log_error(str(e))
+                    dashboard.log_error(str(exc))
                 else:
-                    print(f"[ERROR] {e}")
+                    print(f"[ERROR] {exc}")
                 time.sleep(1)
 
-    # --- Run ---
     if dashboard:
         live = dashboard.start()
         dashboard.log_info(f"Profile: {profile.name}")
         dashboard.log_info(f"Monitoring {len(profile.buttons)} buttons")
-        dashboard.log_info(f"Resolution: {profile.resolution[0]}x{profile.resolution[1]}")
+        dashboard.log_info(
+            f"Resolution: {profile.resolution[0]}x{profile.resolution[1]}"
+        )
         if ocr_data or profile.ocr_regions:
             dashboard.log_info(f"OCR regions: {len(profile.ocr_regions)}")
         dashboard.log_info("Press Ctrl+C to stop")
@@ -216,14 +202,21 @@ def cmd_automate(args):
     if overlay:
         overlay.stop()
 
-    # Final stats
     print("\nFinal Statistics:")
-    for k, v in sm.stats.to_dict().items():
-        print(f"  {k}: {v}")
+    for key, value in sm.stats.to_dict().items():
+        print(f"  {key}: {value}")
+
+    return 0
+
+
+cmd_automate = cmd_run
+
 
 
 def cmd_record(args):
     """Record a macro."""
+    from .recorder import MacroRecorder
+
     recorder = MacroRecorder(record_moves=args.moves)
 
     print("mousecoords v2.0 -- Macro Recorder")
@@ -248,13 +241,18 @@ def cmd_record(args):
     else:
         print("No events recorded.")
 
+    return 0
+
+
 
 def cmd_play(args):
     """Play back a recorded macro."""
+    from .recorder import MacroRecorder
+
     recorder = MacroRecorder()
     recorder.load(args.input)
 
-    print(f"mousecoords v2.0 -- Macro Playback")
+    print("mousecoords v2.0 -- Macro Playback")
     print(f"  File:   {args.input}")
     print(f"  Events: {len(recorder.events)}")
     print(f"  Speed:  {args.speed}x")
@@ -269,12 +267,17 @@ def cmd_play(args):
         pass
 
     print("Playback complete.")
+    return 0
+
 
 
 def cmd_capture(args):
     """Capture a button template for CV-based detection."""
     import keyboard
 
+    from .vision import VisionEngine
+
+    pyautogui = _get_pyautogui()
     vision = VisionEngine()
 
     print("mousecoords v2.0 -- Template Capture")
@@ -296,20 +299,25 @@ def cmd_capture(args):
     vision.save_template(template, name, output_dir)
     print(f"  Saved: {output_dir}/{name}.png ({region[2]}x{region[3]}px)")
     print(f"\nTo use in a profile, set template: \"{output_dir}/{name}.png\"")
+    return 0
+
 
 
 def cmd_profile(args):
     """Manage automation profiles."""
+    from .config import get_default_profile, get_profiles_dir, list_profiles, save_profile
+
     if args.action == "list":
         profiles = list_profiles()
         if profiles:
             print("Available profiles:")
-            for p in profiles:
-                print(f"  - {p}")
+            for profile in profiles:
+                print(f"  - {profile}")
         else:
             print("No profiles found. Use 'profile create' to generate the default.")
+        return 0
 
-    elif args.action == "create":
+    if args.action == "create":
         profile = get_default_profile()
         if args.name:
             profile.name = args.name
@@ -317,20 +325,25 @@ def cmd_profile(args):
         save_profile(profile, path)
         print(f"Created: {path}")
         print("Edit the YAML to customize buttons, colors, limits, and OCR regions.")
+        return 0
 
-    elif args.action == "show":
-        name = args.name or "antimatter_dimensions"
-        path = str(get_profiles_dir() / f"{name}.yaml")
-        if Path(path).exists():
-            print(Path(path).read_text())
-        else:
-            print(f"Profile '{name}' not found. Run 'profile list' to see available profiles.")
+    name = args.name or "antimatter_dimensions"
+    path = str(get_profiles_dir() / f"{name}.yaml")
+    if Path(path).exists():
+        print(Path(path).read_text())
+    else:
+        print(f"Profile '{name}' not found. Run 'profile list' to see available profiles.")
+    return 0
+
 
 
 def cmd_ocr(args):
     """Read text from a screen region using OCR."""
     import keyboard
 
+    from .vision import VisionEngine
+
+    pyautogui = _get_pyautogui()
     vision = VisionEngine()
 
     print("mousecoords v2.0 -- OCR Reader")
@@ -353,69 +366,19 @@ def cmd_ocr(args):
     if number is not None:
         print(f"  Parsed number: {number:,.2f}")
 
+    return 0
+
 
 # ======================================================================
-# CLI
+# Compatibility entry point
 # ======================================================================
 
-def main():
-    parser = argparse.ArgumentParser(
-        prog="mousecoords",
-        description="GUI automation toolkit: computer vision, macro recording, game automation",
-    )
-    sub = parser.add_subparsers(dest="command", help="Available commands")
 
-    # coords
-    sub.add_parser("coords", help="Capture mouse coordinates with color readout")
+def main(argv: list[str] | None = None) -> int:
+    from .cli import main as cli_main
 
-    # automate
-    p_auto = sub.add_parser("automate", help="Run game automation")
-    p_auto.add_argument("-p", "--profile", help="Profile name or YAML path")
-    p_auto.add_argument("--overlay", action="store_true", help="Show visual overlay")
-    p_auto.add_argument("--ocr", action="store_true", help="Enable OCR reading")
-    p_auto.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
-
-    # record
-    p_rec = sub.add_parser("record", help="Record a macro")
-    p_rec.add_argument("-o", "--output", help="Output JSON path")
-    p_rec.add_argument("--moves", action="store_true", help="Also record mouse movement")
-
-    # play
-    p_play = sub.add_parser("play", help="Replay a macro")
-    p_play.add_argument("input", help="Macro JSON file")
-    p_play.add_argument("-s", "--speed", type=float, default=1.0, help="Speed multiplier")
-    p_play.add_argument("-l", "--loop", action="store_true", help="Loop forever")
-
-    # capture
-    p_cap = sub.add_parser("capture", help="Capture button template for CV matching")
-    p_cap.add_argument("-n", "--name", help="Template name")
-    p_cap.add_argument("-o", "--output", help="Output directory")
-
-    # profile
-    p_prof = sub.add_parser("profile", help="Manage automation profiles")
-    p_prof.add_argument("action", choices=["list", "create", "show"])
-    p_prof.add_argument("-n", "--name", help="Profile name")
-
-    # ocr
-    sub.add_parser("ocr", help="Read text from screen region via OCR")
-
-    args = parser.parse_args()
-
-    commands = {
-        "coords": cmd_coords,
-        "automate": cmd_automate,
-        "record": cmd_record,
-        "play": cmd_play,
-        "capture": cmd_capture,
-        "profile": cmd_profile,
-        "ocr": cmd_ocr,
-    }
-
-    if args.command in commands:
-        commands[args.command](args)
-    else:
-        parser.print_help()
+    return cli_main(argv)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

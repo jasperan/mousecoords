@@ -29,7 +29,11 @@ all = [
 ]
 
 [project.scripts]
-mousecoords = "mousecoords.automator:main"
+mousecoords = "mousecoords.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["mousecoords*"]
