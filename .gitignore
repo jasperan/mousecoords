@@ -153,6 +153,13 @@ dmypy.json
 cython_debug/
 
 # mousecoords
+.agents/
+.claude/
+.crush/
+.openhands/
+.serena/
+.pi/
+.worktrees/
 templates/*.png
 recordings/*.json
 docs/plans/
