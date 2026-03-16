@@ -8,18 +8,12 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-import pyautogui
-
-try:
-    from pynput import mouse, keyboard as kb
-    HAS_PYNPUT = True
-except ImportError:
-    HAS_PYNPUT = False
+from .backends.input import InputBackend, PyAutoGuiInputBackend
 
 
 class EventType(str, Enum):
@@ -35,6 +29,7 @@ class EventType(str, Enum):
 @dataclass
 class Event:
     """A single recorded input event."""
+
     type: EventType
     timestamp: float
     x: Optional[int] = None
@@ -44,31 +39,35 @@ class Event:
     pressed: Optional[bool] = None
     dx: Optional[int] = None
     dy: Optional[int] = None
-    # For conditional checks
     check_color: Optional[tuple] = None
     color_tolerance: int = 3
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        d["type"] = self.type.value
-        return {k: v for k, v in d.items() if v is not None}
+        data = asdict(self)
+        data["type"] = self.type.value
+        return {key: value for key, value in data.items() if value is not None}
 
     @classmethod
-    def from_dict(cls, d: dict) -> Event:
-        d = dict(d)  # don't mutate original
-        d["type"] = EventType(d["type"])
-        if "check_color" in d and d["check_color"]:
-            d["check_color"] = tuple(d["check_color"])
-        return cls(**d)
+    def from_dict(cls, data: dict) -> Event:
+        payload = dict(data)
+        payload["type"] = EventType(payload["type"])
+        if "check_color" in payload and payload["check_color"]:
+            payload["check_color"] = tuple(payload["check_color"])
+        return cls(**payload)
 
 
 class MacroRecorder:
     """Records and replays mouse/keyboard macros."""
 
-    def __init__(self, record_moves: bool = False):
+    def __init__(
+        self,
+        record_moves: bool = False,
+        input_backend: Optional[InputBackend] = None,
+    ):
         self.events: list[Event] = []
         self.recording = False
         self.record_moves = record_moves
+        self.input_backend = input_backend or PyAutoGuiInputBackend()
         self._start_time = 0.0
         self._listeners: list = []
 
@@ -76,12 +75,19 @@ class MacroRecorder:
     # Recording
     # ------------------------------------------------------------------
 
-    def start_recording(self):
-        """Start recording mouse and keyboard events. Press ESC to stop."""
-        if not HAS_PYNPUT:
+    @staticmethod
+    def _load_pynput():
+        try:
+            from pynput import keyboard as kb, mouse
+        except Exception as exc:  # pragma: no cover - environment-specific
             raise RuntimeError(
                 "pynput is required for recording. Install: pip install pynput"
-            )
+            ) from exc
+        return mouse, kb
+
+    def start_recording(self):
+        """Start recording mouse and keyboard events. Press ESC to stop."""
+        mouse, kb = self._load_pynput()
 
         self.events = []
         self.recording = True
@@ -115,31 +121,42 @@ class MacroRecorder:
     def _on_click(self, x, y, button, pressed):
         if not self.recording:
             return
-        self.events.append(Event(
-            type=EventType.MOUSE_CLICK,
-            timestamp=self._elapsed(),
-            x=x, y=y,
-            button=button.name,
-            pressed=pressed,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.MOUSE_CLICK,
+                timestamp=self._elapsed(),
+                x=x,
+                y=y,
+                button=button.name,
+                pressed=pressed,
+            )
+        )
 
     def _on_scroll(self, x, y, dx, dy):
         if not self.recording:
             return
-        self.events.append(Event(
-            type=EventType.MOUSE_SCROLL,
-            timestamp=self._elapsed(),
-            x=x, y=y, dx=dx, dy=dy,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.MOUSE_SCROLL,
+                timestamp=self._elapsed(),
+                x=x,
+                y=y,
+                dx=dx,
+                dy=dy,
+            )
+        )
 
     def _on_move(self, x, y):
         if not self.recording:
             return
-        self.events.append(Event(
-            type=EventType.MOUSE_MOVE,
-            timestamp=self._elapsed(),
-            x=x, y=y,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.MOUSE_MOVE,
+                timestamp=self._elapsed(),
+                x=x,
+                y=y,
+            )
+        )
 
     def _on_key_press(self, key):
         if not self.recording:
@@ -153,12 +170,14 @@ class MacroRecorder:
             self.stop_recording()
             return
 
-        self.events.append(Event(
-            type=EventType.KEY_PRESS,
-            timestamp=self._elapsed(),
-            key=key_name,
-            pressed=True,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.KEY_PRESS,
+                timestamp=self._elapsed(),
+                key=key_name,
+                pressed=True,
+            )
+        )
 
     def _on_key_release(self, key):
         if not self.recording:
@@ -168,12 +187,14 @@ class MacroRecorder:
         except AttributeError:
             key_name = key.name
 
-        self.events.append(Event(
-            type=EventType.KEY_RELEASE,
-            timestamp=self._elapsed(),
-            key=key_name,
-            pressed=False,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.KEY_RELEASE,
+                timestamp=self._elapsed(),
+                key=key_name,
+                pressed=False,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Persistence
@@ -186,23 +207,27 @@ class MacroRecorder:
             "version": "2.0",
             "event_count": len(self.events),
             "duration": self.events[-1].timestamp if self.events else 0,
-            "events": [e.to_dict() for e in self.events],
+            "events": [event.to_dict() for event in self.events],
         }
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+        with open(path, "w") as handle:
+            json.dump(data, handle, indent=2)
 
     def load(self, path: str):
         """Load events from a JSON file."""
-        with open(path) as f:
-            data = json.load(f)
-        self.events = [Event.from_dict(e) for e in data["events"]]
+        with open(path) as handle:
+            data = json.load(handle)
+        self.events = [Event.from_dict(event) for event in data["events"]]
 
     # ------------------------------------------------------------------
     # Playback
     # ------------------------------------------------------------------
 
-    def play(self, speed: float = 1.0, loop: bool = False,
-             on_event: Optional[Callable] = None):
+    def play(
+        self,
+        speed: float = 1.0,
+        loop: bool = False,
+        on_event: Optional[Callable] = None,
+    ):
         """Replay recorded events with optional speed multiplier."""
         if not self.events:
             return
@@ -225,19 +250,24 @@ class MacroRecorder:
 
     def _execute_event(self, event: Event):
         """Execute a single event during playback."""
-        if event.type == EventType.MOUSE_MOVE:
-            pyautogui.moveTo(event.x, event.y, _pause=False)
+        if event.type == EventType.MOUSE_MOVE and event.x is not None and event.y is not None:
+            self.input_backend.move_to(event.x, event.y)
 
-        elif event.type == EventType.MOUSE_CLICK:
-            if event.pressed:
-                pyautogui.click(event.x, event.y, _pause=False)
+        elif event.type == EventType.MOUSE_CLICK and event.pressed and event.x is not None and event.y is not None:
+            self.input_backend.click(event.x, event.y, button=event.button or "left")
 
         elif event.type == EventType.MOUSE_SCROLL:
-            pyautogui.scroll(event.dy, event.x, event.y, _pause=False)
+            self.input_backend.scroll(event.dy or 0, event.x, event.y)
 
-        elif event.type == EventType.KEY_PRESS:
+        elif event.type == EventType.KEY_PRESS and event.key:
             try:
-                pyautogui.press(event.key, _pause=False)
+                self.input_backend.press(event.key)
+            except Exception:
+                pass
+
+        elif event.type == EventType.KEY_RELEASE and event.key:
+            try:
+                self.input_backend.key_up(event.key)
             except Exception:
                 pass
 
@@ -250,34 +280,52 @@ class MacroRecorder:
 
     def add_click(self, x: int, y: int, delay: float = 0.0):
         """Programmatically add a click event."""
-        self.events.append(Event(
-            type=EventType.MOUSE_CLICK,
-            timestamp=self._next_ts(delay),
-            x=x, y=y, button="left", pressed=True,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.MOUSE_CLICK,
+                timestamp=self._next_ts(delay),
+                x=x,
+                y=y,
+                button="left",
+                pressed=True,
+            )
+        )
 
     def add_wait(self, seconds: float):
         """Add a timed pause."""
-        self.events.append(Event(
-            type=EventType.WAIT,
-            timestamp=self._next_ts(seconds),
-        ))
+        self.events.append(
+            Event(
+                type=EventType.WAIT,
+                timestamp=self._next_ts(seconds),
+            )
+        )
 
     def add_key(self, key: str, delay: float = 0.0):
         """Add a key press event."""
-        self.events.append(Event(
-            type=EventType.KEY_PRESS,
-            timestamp=self._next_ts(delay),
-            key=key, pressed=True,
-        ))
+        self.events.append(
+            Event(
+                type=EventType.KEY_PRESS,
+                timestamp=self._next_ts(delay),
+                key=key,
+                pressed=True,
+            )
+        )
 
-    def add_condition(self, x: int, y: int, expected_color: tuple,
-                      tolerance: int = 3):
-        """Add a conditional color check (playback skips if color doesn't match)."""
-        self.events.append(Event(
-            type=EventType.CONDITION,
-            timestamp=self._next_ts(),
-            x=x, y=y,
-            check_color=expected_color,
-            color_tolerance=tolerance,
-        ))
+    def add_condition(
+        self,
+        x: int,
+        y: int,
+        expected_color: tuple,
+        tolerance: int = 3,
+    ):
+        """Add a conditional color check."""
+        self.events.append(
+            Event(
+                type=EventType.CONDITION,
+                timestamp=self._next_ts(),
+                x=x,
+                y=y,
+                check_color=expected_color,
+                color_tolerance=tolerance,
+            )
+        )
