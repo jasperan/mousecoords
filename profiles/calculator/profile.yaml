@@ -1,0 +1,39 @@
+schema_version: 2
+kind: desktop
+name: calculator
+app:
+  window:
+    title: Calculator
+    title_match: contains
+  base_resolution: [1440, 900]
+runtime:
+  poll_interval: 0.25
+  color_tolerance: 4
+  scale_mode: window
+  dry_run_safe: true
+targets:
+  - name: digit_7
+    selectors:
+      - type: template
+        path: assets/templates/digit_7.png
+        confidence: 0.92
+      - type: color
+        point: [330, 450]
+        rgb: [240, 240, 240]
+        tolerance: 6
+    action:
+      type: click
+      cooldown: 0.2
+regions:
+  - name: result_text
+    rect: [210, 120, 200, 40]
+    ocr:
+      mode: text
+      preprocess: otsu
+states:
+  - name: default
+    watch: [digit_7]
+    transitions: {}
+    limits: {}
+assets:
+  reference: assets/reference/main.png
