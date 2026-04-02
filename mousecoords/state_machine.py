@@ -2,6 +2,10 @@
 
 Replaces the flat polling loop with named states, each defining which
 buttons to monitor, per-cycle action limits, and transition triggers.
+
+The state machine is fully profile-driven: phases, transitions, and
+action limits all come from the YAML profile. No game-specific logic
+is hardcoded here.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from .config import Profile, ButtonConfig, StateConfig
 
 
 class GamePhase(str, Enum):
+    """Well-known phases (for backward compat). Profiles can use any name."""
     FARMING = "farming"
     CRUNCHING = "crunching"
     INFINITY = "infinity"
@@ -32,38 +37,36 @@ class ActionResult:
 
 @dataclass
 class GameStats:
-    """Tracks cumulative and per-cycle statistics."""
-    dimension_boosts: int = 0
-    antimatter_galaxies: int = 0
-    big_crunches: int = 0
-    max_ticks: int = 0
-    infinities: int = 0
-    eternities: int = 0
+    """Tracks cumulative and per-cycle statistics.
 
-    # Per-cycle counters (reset on Big Crunch)
-    cycle_boosts: int = 0
-    cycle_galaxies: int = 0
-
-    # Limits (loaded from profile)
-    max_boosts_per_cycle: int = 22
-    max_galaxies_per_cycle: int = 1
+    Uses generic counters keyed by button name. Legacy named fields are
+    kept for backward compatibility with existing profiles/dashboards.
+    """
+    # Generic counters (button_name -> lifetime count)
+    action_totals: dict = field(default_factory=dict)
+    # Per-cycle counters (reset on state transition)
+    cycle_counts: dict = field(default_factory=dict)
 
     # Session
     start_time: float = field(default_factory=time.time)
     total_clicks: int = 0
+    transitions: int = 0
+
+    def record(self, button_name: str):
+        """Increment counters for a button click."""
+        self.total_clicks += 1
+        self.action_totals[button_name] = self.action_totals.get(button_name, 0) + 1
+        self.cycle_counts[button_name] = self.cycle_counts.get(button_name, 0) + 1
 
     def reset_cycle(self):
-        """Reset per-cycle counters (called on Big Crunch)."""
-        self.cycle_boosts = 0
-        self.cycle_galaxies = 0
+        """Reset per-cycle counters (called on state transitions)."""
+        self.cycle_counts.clear()
 
-    @property
-    def boosts_remaining(self) -> int:
-        return max(0, self.max_boosts_per_cycle - self.cycle_boosts)
+    def cycle_count(self, button_name: str) -> int:
+        return self.cycle_counts.get(button_name, 0)
 
-    @property
-    def galaxies_remaining(self) -> int:
-        return max(0, self.max_galaxies_per_cycle - self.cycle_galaxies)
+    def total_count(self, button_name: str) -> int:
+        return self.action_totals.get(button_name, 0)
 
     @property
     def session_duration(self) -> float:
@@ -73,25 +76,30 @@ class GameStats:
         mins, secs = divmod(int(self.session_duration), 60)
         hrs, mins = divmod(mins, 60)
         duration = f"{hrs}h{mins:02d}m{secs:02d}s" if hrs else f"{mins}m{secs:02d}s"
-        return {
-            "Dimension Boosts": self.dimension_boosts,
-            "Boosts This Cycle": f"{self.cycle_boosts}/{self.max_boosts_per_cycle}",
-            "Antimatter Galaxies": self.antimatter_galaxies,
-            "Galaxies This Cycle": f"{self.cycle_galaxies}/{self.max_galaxies_per_cycle}",
-            "Big Crunches": self.big_crunches,
-            "Max Ticks": self.max_ticks,
-            "Total Clicks": self.total_clicks,
-            "Session": duration,
-        }
+
+        d = {}
+        for name, total in self.action_totals.items():
+            d[name] = total
+            cycle = self.cycle_counts.get(name, 0)
+            if cycle:
+                d[f"{name} (cycle)"] = cycle
+
+        d["Total Clicks"] = self.total_clicks
+        d["Transitions"] = self.transitions
+        d["Session"] = duration
+        return d
 
 
 class StateMachine:
-    """Finite state machine driving Antimatter Dimensions automation."""
+    """Profile-driven finite state machine for automation.
+
+    Phases, transitions, and action limits are all defined in the YAML
+    profile. The machine itself has no game-specific knowledge.
+    """
 
     def __init__(self, profile: Profile):
         self.profile = profile
         self.stats = GameStats()
-        self.phase = GamePhase.FARMING
         self.cooldowns: dict[str, float] = {}
 
         self._on_transition: list[Callable] = []
@@ -101,18 +109,27 @@ class StateMachine:
         self._buttons = {b.name: b for b in profile.buttons}
         self._states = {s.name: s for s in profile.states}
 
-        # Apply limits from the initial state config
-        self._apply_limits()
+        # Start in first defined state, or "farming" as fallback
+        initial = profile.states[0].name if profile.states else "farming"
+        self._phase: str = initial
 
-    def _apply_limits(self):
-        """Load action limits from the current state config."""
-        state = self.current_state_config
-        if not state:
-            return
-        if "Dimension Boost" in state.max_actions:
-            self.stats.max_boosts_per_cycle = state.max_actions["Dimension Boost"]
-        if "Antimatter Galaxies" in state.max_actions:
-            self.stats.max_galaxies_per_cycle = state.max_actions["Antimatter Galaxies"]
+    # ------------------------------------------------------------------
+    # Phase property (backward compat: returns GamePhase when possible)
+    # ------------------------------------------------------------------
+
+    @property
+    def phase(self):
+        try:
+            return GamePhase(self._phase)
+        except ValueError:
+            return self._phase
+
+    @phase.setter
+    def phase(self, value):
+        if isinstance(value, GamePhase):
+            self._phase = value.value
+        else:
+            self._phase = str(value)
 
     # ------------------------------------------------------------------
     # Callbacks
@@ -132,7 +149,7 @@ class StateMachine:
 
     @property
     def current_state_config(self) -> Optional[StateConfig]:
-        return self._states.get(self.phase.value)
+        return self._states.get(self._phase)
 
     @property
     def monitored_buttons(self) -> list:
@@ -152,16 +169,28 @@ class StateMachine:
         return time.time() < self.cooldowns[button_name]
 
     def can_click(self, button_name: str) -> bool:
-        """Whether the button is clickable right now."""
-        if self.phase == GamePhase.PAUSED:
+        """Whether the button is clickable right now (generic limit check)."""
+        if self._phase == "paused":
             return False
         if self.is_on_cooldown(button_name):
             return False
-        if button_name == "Dimension Boost" and self.stats.boosts_remaining <= 0:
-            return False
-        if button_name == "Antimatter Galaxies" and self.stats.galaxies_remaining <= 0:
-            return False
+
+        # Check per-cycle action limits from the current state config
+        state = self.current_state_config
+        if state and button_name in state.max_actions:
+            limit = state.max_actions[button_name]
+            if self.stats.cycle_count(button_name) >= limit:
+                return False
+
         return True
+
+    def remaining(self, button_name: str) -> Optional[int]:
+        """How many more clicks are allowed this cycle, or None if unlimited."""
+        state = self.current_state_config
+        if not state or button_name not in state.max_actions:
+            return None
+        limit = state.max_actions[button_name]
+        return max(0, limit - self.stats.cycle_count(button_name))
 
     # ------------------------------------------------------------------
     # Actions
@@ -175,31 +204,22 @@ class StateMachine:
 
         # Set cooldown
         self.cooldowns[button_name] = time.time() + button.cooldown
-        self.stats.total_clicks += 1
 
-        # Update counters
-        if button_name == "Dimension Boost":
-            self.stats.dimension_boosts += 1
-            self.stats.cycle_boosts += 1
-        elif button_name == "Antimatter Galaxies":
-            self.stats.antimatter_galaxies += 1
-            self.stats.cycle_galaxies += 1
-        elif button_name == "Big Crunch":
-            self.stats.big_crunches += 1
-            self.stats.reset_cycle()
-        elif button_name == "Max Ticks":
-            self.stats.max_ticks += 1
+        # Update generic counters
+        self.stats.record(button_name)
 
         result = ActionResult(button_name, True, time.time())
 
         # Check state transitions
         state = self.current_state_config
         if state and button_name in state.transitions:
-            new_phase = GamePhase(state.transitions[button_name])
+            new_phase_name = state.transitions[button_name]
             old_phase = self.phase
-            self.phase = new_phase
+            self._phase = new_phase_name
+            self.stats.transitions += 1
+            self.stats.reset_cycle()
             for cb in self._on_transition:
-                cb(old_phase, new_phase, button_name)
+                cb(old_phase, self.phase, button_name)
 
         for cb in self._on_action:
             cb(result)
@@ -211,7 +231,14 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def pause(self):
-        self.phase = GamePhase.PAUSED
+        self._phase = "paused"
 
-    def resume(self, phase: Optional[GamePhase] = None):
-        self.phase = phase or GamePhase.FARMING
+    def resume(self, phase: Optional[str] = None):
+        if phase is None:
+            initial = (self.profile.states[0].name
+                       if self.profile.states else "farming")
+            self._phase = initial
+        elif isinstance(phase, GamePhase):
+            self._phase = phase.value
+        else:
+            self._phase = str(phase)

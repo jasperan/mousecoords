@@ -1,7 +1,7 @@
 """Main automation orchestrator and CLI entry point.
 
 Ties together config, vision, state machine, TUI, overlay, recorder,
-and OCR into a unified command-line interface.
+OCR, diagnostics, and screen watcher into a unified command-line interface.
 
 Usage:
     mousecoords coords          # grab mouse coordinates
@@ -11,15 +11,18 @@ Usage:
     mousecoords capture         # capture a button template
     mousecoords profile list    # manage profiles
     mousecoords ocr             # read text from screen region
+    mousecoords doctor          # check system dependencies
+    mousecoords watch           # monitor a pixel for color changes
 """
 
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Event as ThreadEvent
 
 import pyautogui
 
@@ -32,9 +35,21 @@ from .state_machine import StateMachine, GamePhase
 from .tui import Dashboard, HAS_RICH
 from .recorder import MacroRecorder
 
-# Disable pyautogui safety features for automation
-pyautogui.FAILSAFE = False
+# Re-enable pyautogui failsafe (move mouse to corner to emergency-stop).
+# Users can disable with --no-failsafe if they know what they're doing.
+pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0
+
+# Global shutdown event for clean Ctrl+C handling
+_shutdown = ThreadEvent()
+
+
+def _install_signal_handlers():
+    """Install SIGINT/SIGTERM handlers that set the shutdown event."""
+    def _handler(signum, frame):
+        _shutdown.set()
+    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGTERM, _handler)
 
 
 # ======================================================================
@@ -46,7 +61,7 @@ def cmd_coords(args):
     import keyboard
 
     vision = VisionEngine()
-    print("mousecoords v2.0 -- Coordinate Grabber")
+    print("mousecoords -- Coordinate Grabber")
     print("Press SPACE to capture coordinates, Q to quit")
     print("-" * 45)
 
@@ -66,6 +81,9 @@ def cmd_coords(args):
 
 def cmd_automate(args):
     """Run game automation with vision, state machine, and TUI."""
+    if args.no_failsafe:
+        pyautogui.FAILSAFE = False
+
     # Load profile
     if args.profile:
         profile_path = args.profile
@@ -87,7 +105,7 @@ def cmd_automate(args):
         dashboard.set_mode("Game Automation")
 
     def on_transition(old, new, trigger):
-        msg = f"{old.value} -> {new.value} (triggered by {trigger})"
+        msg = f"{old} -> {new} (triggered by {trigger})"
         if dashboard:
             dashboard.log_state(msg)
         else:
@@ -122,7 +140,7 @@ def cmd_automate(args):
     ocr_data: dict = {}
     if args.ocr and profile.ocr_regions:
         def ocr_loop():
-            while True:
+            while not _shutdown.is_set():
                 for name, region in profile.ocr_regions.items():
                     val = vision.read_number(region)
                     if val is not None:
@@ -133,11 +151,14 @@ def cmd_automate(args):
 
     # --- Main automation loop ---
     def automation_loop():
-        while True:
+        while not _shutdown.is_set():
             try:
                 buttons = sm.monitored_buttons
 
                 for btn in buttons:
+                    if _shutdown.is_set():
+                        break
+
                     if not sm.can_click(btn.name):
                         if dashboard:
                             status = "cooldown" if sm.is_on_cooldown(btn.name) else "disabled"
@@ -164,8 +185,8 @@ def cmd_automate(args):
                         pyautogui.click(click_x, click_y)
                         sm.record_action(btn.name)
 
-                        # Priority: after clicking galaxies, skip rest
-                        if btn.name == "Antimatter Galaxies":
+                        # Priority buttons: skip remaining buttons this cycle
+                        if btn.priority:
                             break
                     else:
                         if dashboard:
@@ -179,7 +200,9 @@ def cmd_automate(args):
 
                 if dashboard:
                     dashboard.update_stats(stats)
-                    dashboard.set_state(sm.phase.value.upper())
+                    phase = sm.phase
+                    phase_str = phase.value if isinstance(phase, GamePhase) else str(phase)
+                    dashboard.set_state(phase_str.upper())
 
                 time.sleep(profile.poll_interval)
 
@@ -193,15 +216,21 @@ def cmd_automate(args):
                 time.sleep(1)
 
     # --- Run ---
+    _install_signal_handlers()
+
     if dashboard:
         live = dashboard.start()
         dashboard.log_info(f"Profile: {profile.name}")
         dashboard.log_info(f"Monitoring {len(profile.buttons)} buttons")
         dashboard.log_info(f"Resolution: {profile.resolution[0]}x{profile.resolution[1]}")
-        if ocr_data or profile.ocr_regions:
+        if profile.ocr_regions:
             dashboard.log_info(f"OCR regions: {len(profile.ocr_regions)}")
+        if pyautogui.FAILSAFE:
+            dashboard.log_info("Failsafe ON (move mouse to corner to stop)")
         dashboard.log_info("Press Ctrl+C to stop")
-        dashboard.set_state(sm.phase.value.upper())
+        phase = sm.phase
+        phase_str = phase.value if isinstance(phase, GamePhase) else str(phase)
+        dashboard.set_state(phase_str.upper())
 
         with live:
             automation_loop()
@@ -209,6 +238,8 @@ def cmd_automate(args):
     else:
         print(f"Profile: {profile.name}")
         print(f"Monitoring {len(profile.buttons)} buttons")
+        if pyautogui.FAILSAFE:
+            print("Failsafe ON (move mouse to top-left corner to emergency stop)")
         print("Press Ctrl+C to stop")
         print("-" * 45)
         automation_loop()
@@ -226,7 +257,7 @@ def cmd_record(args):
     """Record a macro."""
     recorder = MacroRecorder(record_moves=args.moves)
 
-    print("mousecoords v2.0 -- Macro Recorder")
+    print("mousecoords -- Macro Recorder")
     print("Recording starts NOW. Press ESC to stop.")
     print("-" * 45)
 
@@ -254,7 +285,7 @@ def cmd_play(args):
     recorder = MacroRecorder()
     recorder.load(args.input)
 
-    print(f"mousecoords v2.0 -- Macro Playback")
+    print(f"mousecoords -- Macro Playback")
     print(f"  File:   {args.input}")
     print(f"  Events: {len(recorder.events)}")
     print(f"  Speed:  {args.speed}x")
@@ -277,7 +308,7 @@ def cmd_capture(args):
 
     vision = VisionEngine()
 
-    print("mousecoords v2.0 -- Template Capture")
+    print("mousecoords -- Template Capture")
     print("Position mouse at TOP-LEFT of button, press SPACE")
     keyboard.wait("space")
     x1, y1 = pyautogui.position()
@@ -333,7 +364,7 @@ def cmd_ocr(args):
 
     vision = VisionEngine()
 
-    print("mousecoords v2.0 -- OCR Reader")
+    print("mousecoords -- OCR Reader")
     print("Position at TOP-LEFT of text region, press SPACE")
     keyboard.wait("space")
     x1, y1 = pyautogui.position()
@@ -352,6 +383,39 @@ def cmd_ocr(args):
     number = vision.read_number(region)
     if number is not None:
         print(f"  Parsed number: {number:,.2f}")
+
+
+def cmd_doctor(args):
+    """Run system diagnostics."""
+    from .doctor import collect_diagnostics, print_diagnostics
+    results = collect_diagnostics()
+    print_diagnostics(results)
+
+
+def cmd_watch(args):
+    """Monitor a screen pixel for color changes."""
+    from .watcher import ScreenWatcher
+
+    if args.pick:
+        import keyboard
+        print("mousecoords -- Screen Watcher")
+        print("Position mouse at the pixel to watch, press SPACE")
+        keyboard.wait("space")
+        x, y = pyautogui.position()
+    else:
+        x, y = args.x, args.y
+
+    if x is None or y is None:
+        print("Specify coordinates: mousecoords watch -x 100 -y 200")
+        print("Or use --pick to select with your mouse.")
+        sys.exit(1)
+
+    watcher = ScreenWatcher(
+        x=x, y=y,
+        threshold=args.threshold,
+        poll_interval=args.interval,
+    )
+    watcher.watch(duration=args.duration)
 
 
 # ======================================================================
@@ -374,6 +438,8 @@ def main():
     p_auto.add_argument("--overlay", action="store_true", help="Show visual overlay")
     p_auto.add_argument("--ocr", action="store_true", help="Enable OCR reading")
     p_auto.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
+    p_auto.add_argument("--no-failsafe", action="store_true",
+                        help="Disable pyautogui corner failsafe")
 
     # record
     p_rec = sub.add_parser("record", help="Record a macro")
@@ -399,6 +465,22 @@ def main():
     # ocr
     sub.add_parser("ocr", help="Read text from screen region via OCR")
 
+    # doctor
+    sub.add_parser("doctor", help="Check system dependencies and environment")
+
+    # watch
+    p_watch = sub.add_parser("watch", help="Monitor a pixel for color changes")
+    p_watch.add_argument("-x", type=int, default=None, help="X coordinate")
+    p_watch.add_argument("-y", type=int, default=None, help="Y coordinate")
+    p_watch.add_argument("--pick", action="store_true",
+                         help="Pick coordinates with mouse (press SPACE)")
+    p_watch.add_argument("-t", "--threshold", type=float, default=10.0,
+                         help="Color change threshold (default: 10.0)")
+    p_watch.add_argument("-i", "--interval", type=float, default=0.5,
+                         help="Poll interval in seconds (default: 0.5)")
+    p_watch.add_argument("-d", "--duration", type=float, default=0,
+                         help="Watch duration in seconds (0=forever)")
+
     args = parser.parse_args()
 
     commands = {
@@ -409,6 +491,8 @@ def main():
         "capture": cmd_capture,
         "profile": cmd_profile,
         "ocr": cmd_ocr,
+        "doctor": cmd_doctor,
+        "watch": cmd_watch,
     }
 
     if args.command in commands:

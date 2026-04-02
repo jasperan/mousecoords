@@ -241,6 +241,31 @@ class MacroRecorder:
             except Exception:
                 pass
 
+        elif event.type == EventType.WAIT:
+            # Explicit wait (timestamp delta handles most timing, but
+            # WAIT events added via add_wait() insert an explicit pause)
+            pass  # timing is handled by the play() loop via timestamps
+
+        elif event.type == EventType.CONDITION:
+            # Wait until pixel color matches, with a 10-second timeout
+            self._wait_for_condition(event)
+
+    def _wait_for_condition(self, event: Event, timeout: float = 10.0):
+        """Block until pixel at (x, y) matches expected color, or timeout."""
+        if event.check_color is None or event.x is None or event.y is None:
+            return
+
+        deadline = time.time() + timeout
+        tolerance = event.color_tolerance
+
+        while time.time() < deadline:
+            img = pyautogui.screenshot(region=(event.x, event.y, 1, 1))
+            actual = img.getpixel((0, 0))[:3]
+            if all(abs(a - b) <= tolerance
+                   for a, b in zip(actual, event.check_color)):
+                return  # condition met
+            time.sleep(0.1)
+
     # ------------------------------------------------------------------
     # Programmatic macro building
     # ------------------------------------------------------------------

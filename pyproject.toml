@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "mousecoords"
-version = "2.0.0"
+version = "2.1.0"
 description = "GUI automation toolkit with computer vision, macro recording, and game automation"
 readme = "README.md"
 license = "MPL-2.0"
@@ -28,8 +28,13 @@ all = [
     "rich>=13.0",
 ]
 
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+
 [project.scripts]
 mousecoords = "mousecoords.automator:main"
 
 [tool.setuptools.packages.find]
 include = ["mousecoords*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

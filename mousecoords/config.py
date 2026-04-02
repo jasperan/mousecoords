@@ -19,6 +19,7 @@ class ButtonConfig:
     action: str = "click"
     cooldown: float = 1.0
     template: Optional[str] = None  # path to template image for CV matching
+    priority: bool = False  # if True, skip remaining buttons after clicking this one
 
     def __post_init__(self):
         if isinstance(self.color, list):
@@ -73,6 +74,7 @@ class Profile:
                 action=b.action,
                 cooldown=b.cooldown,
                 template=b.template,
+                priority=b.priority,
             ))
 
         scaled_ocr = {}
@@ -130,6 +132,7 @@ def save_profile(profile: Profile, path: str):
                 "color": list(b.color), "action": b.action,
                 "cooldown": b.cooldown,
                 **({"template": b.template} if b.template else {}),
+                **({"priority": b.priority} if b.priority else {}),
             }
             for b in profile.buttons
         ],
@@ -171,7 +174,8 @@ def get_default_profile() -> Profile:
         poll_interval=0.5,
         color_tolerance=3,
         buttons=[
-            ButtonConfig("Antimatter Galaxies", 2076, 908, (103, 196, 90), cooldown=1.0),
+            ButtonConfig("Antimatter Galaxies", 2076, 908, (103, 196, 90),
+                         cooldown=1.0, priority=True),
             ButtonConfig("Dimension Boost", 860, 909, (103, 196, 90), cooldown=1.0),
             ButtonConfig("Big Crunch", 1512, 111, (51, 127, 182), cooldown=1.0),
             ButtonConfig("Max Ticks", 1546, 328, (103, 196, 90), cooldown=1.5),
