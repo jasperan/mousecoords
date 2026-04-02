@@ -397,7 +397,11 @@ def cmd_watch(args):
     from .watcher import ScreenWatcher
 
     if args.pick:
-        import keyboard
+        try:
+            import keyboard
+        except ImportError:
+            print("keyboard module required for --pick. Run: mousecoords doctor")
+            sys.exit(1)
         print("mousecoords -- Screen Watcher")
         print("Position mouse at the pixel to watch, press SPACE")
         keyboard.wait("space")

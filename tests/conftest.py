@@ -1,8 +1,9 @@
 """Shared fixtures for mousecoords tests.
 
-All tests run headless (no display) by mocking pyautogui and keyboard.
-The mouseinfo module (pyautogui dep) tries to connect to X11 at import
-time, so we intercept it with a mock before anything else loads.
+All tests run headless (no display) by mocking pyautogui's X11 deps.
+This conftest intercepts Xlib.display.Display AND mouseinfo before
+pyautogui tries to connect, so tests work on any headless server/CI
+without xvfb-run.
 """
 
 from __future__ import annotations
@@ -11,15 +12,32 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-# Headless guard: mock mouseinfo before pyautogui import attempts X11.
-if "DISPLAY" not in os.environ or not os.environ["DISPLAY"]:
+# ---------- Headless guard ----------
+# pyautogui on Linux does two things at import time that need a display:
+#   1. mouseinfo tries Xlib.display.Display(DISPLAY)
+#   2. _pyautogui_x11 tries Xlib.display.Display(DISPLAY)
+# We mock both so tests collect without an X server.
+
+if "DISPLAY" not in os.environ:
     os.environ["DISPLAY"] = ":0"
 
-# Always mock mouseinfo to avoid X11 connection in tests
-_mock_mouseinfo = MagicMock()
-sys.modules.setdefault("mouseinfo", _mock_mouseinfo)
+# Mock Xlib.display.Display to avoid ConnectionRefusedError
+_mock_xlib_display = MagicMock()
+_mock_xlib = MagicMock()
+_mock_xlib.display.Display.return_value = _mock_xlib_display
+sys.modules.setdefault("Xlib", _mock_xlib)
+sys.modules.setdefault("Xlib.display", _mock_xlib.display)
+sys.modules.setdefault("Xlib.X", MagicMock())
+sys.modules.setdefault("Xlib.ext", MagicMock())
+sys.modules.setdefault("Xlib.ext.xtest", MagicMock())
+sys.modules.setdefault("Xlib.XK", MagicMock())
+sys.modules.setdefault("Xlib.protocol", MagicMock())
+sys.modules.setdefault("Xlib.protocol.event", MagicMock())
 
-# Now safe to import everything
+# Mock mouseinfo (pyautogui dep that also hits X11)
+sys.modules.setdefault("mouseinfo", MagicMock())
+
+# ---------- Now safe to import ----------
 import pytest
 from unittest.mock import patch
 from pathlib import Path

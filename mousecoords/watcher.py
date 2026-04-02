@@ -77,30 +77,20 @@ class ScreenWatcher:
             print(f"Duration: {duration}s")
         print("-" * 50)
 
+        def _print_change(old_color, new_color, timestamp):
+            dist = self.color_distance(old_color, new_color)
+            ts = time.strftime("%H:%M:%S")
+            print(f"  [{ts}] CHANGE #{self.change_count}: "
+                  f"RGB{old_color} -> RGB{new_color} (delta={dist:.1f})")
+
+        self.on_change(_print_change)
+
         start = time.time()
         try:
             while self.running:
                 if duration and (time.time() - start) >= duration:
                     break
-
-                current = self.get_pixel_color(self.x, self.y)
-                dist = self.color_distance(self._last_color, current)
-
-                if dist > self.threshold:
-                    old = self._last_color
-                    self._last_color = current
-                    self.change_count += 1
-                    self.history.append({
-                        "from": old, "to": current,
-                        "delta": round(dist, 1),
-                        "time": time.time(),
-                    })
-                    ts = time.strftime("%H:%M:%S")
-                    print(f"  [{ts}] CHANGE #{self.change_count}: "
-                          f"RGB{old} -> RGB{current} (delta={dist:.1f})")
-                    for cb in self._callbacks:
-                        cb(old, current, time.time())
-
+                self.check_once()
                 time.sleep(self.poll_interval)
         except KeyboardInterrupt:
             pass
