@@ -17,6 +17,13 @@ class CheckResult:
     required: bool = True
 
 
+def _format_gui_error(exc: Exception) -> str:
+    """Normalize display-related import/runtime failures into readable output."""
+    if isinstance(exc, KeyError) and exc.args == ("DISPLAY",):
+        return "requires an active DISPLAY/GUI session"
+    return str(exc)
+
+
 def check_display() -> CheckResult:
     if sys.platform == "win32":
         return CheckResult("display", True, "Windows (always available)")
@@ -34,6 +41,8 @@ def check_pyautogui() -> CheckResult:
         return CheckResult("pyautogui", True, f"v{pyautogui.__version__}")
     except ImportError:
         return CheckResult("pyautogui", False, "not installed")
+    except Exception as e:
+        return CheckResult("pyautogui", False, _format_gui_error(e))
 
 
 def check_screenshot() -> CheckResult:
@@ -42,7 +51,7 @@ def check_screenshot() -> CheckResult:
         pyautogui.screenshot(region=(0, 0, 1, 1))
         return CheckResult("screenshot", True, "capture working")
     except Exception as e:
-        return CheckResult("screenshot", False, str(e))
+        return CheckResult("screenshot", False, _format_gui_error(e))
 
 
 def check_opencv() -> CheckResult:

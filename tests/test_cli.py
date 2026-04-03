@@ -73,6 +73,8 @@ class TestDoctorCommand:
         assert result.returncode == 0, result.stderr
         assert "System Diagnostics" in result.stdout
         assert "display" in result.stdout.lower()
+        assert "unexpected error" not in result.stdout
+        assert "requires an active DISPLAY/GUI session" in result.stdout
 
 
 class TestProfileCommand:
