@@ -33,6 +33,7 @@ from .config import (
     list_profiles, get_profiles_dir, is_default_profile_name,
     profile_to_data, resolve_profile_target, validate_profile,
 )
+from .demo import create_demo_project, launch_demo_app, run_demo_smoke
 from .runtime import run_automation_session
 from .studio import create_studio_project
 
@@ -479,6 +480,83 @@ def cmd_studio(args):
     raise SystemExit(1)
 
 
+def cmd_demo_pack(args):
+    """Create a ready-to-run demo profile pack."""
+    try:
+        profile_path = create_demo_project(
+            args.output,
+            name=args.name,
+            force=args.force,
+        )
+    except FileExistsError as exc:
+        print(str(exc))
+        raise SystemExit(1)
+
+    print(f"Created demo profile pack: {Path(args.output)}")
+    print(f"  Profile: {profile_path}")
+    print("  Next:    mousecoords demo launch --state-file /tmp/mousecoords-demo.json")
+    print(f"           mousecoords run -p {Path(args.output)} --duration 2 --json")
+
+
+def cmd_demo_launch(args):
+    """Launch the built-in demo automation target."""
+    try:
+        launch_demo_app(
+            state_file=args.state_file,
+            ready_file=args.ready_file,
+            duration=args.duration,
+        )
+    except Exception as exc:
+        print(f"`mousecoords demo launch` requires an active graphical session.")
+        print(f"Reason: {_format_gui_error(exc)}")
+        print("Run `mousecoords doctor` for diagnostics. On headless Linux, try `xvfb-run -a ...`.")
+        raise SystemExit(1)
+
+
+def cmd_demo_smoke(args):
+    """Run the built-in demo and the real automation CLI end-to-end."""
+    payload = run_demo_smoke(
+        profile=args.profile,
+        bundle_dir=args.bundle_dir,
+        debug=args.debug,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Profile: {payload.get('profile')}")
+        print(f"Success: {payload.get('success')}")
+        if "automation" in payload:
+            print(
+                "Automation clicks: "
+                f"{payload['automation'].get('stats', {}).get('Total Clicks', 0)}"
+            )
+        if "demo_state" in payload:
+            print(
+                "Demo clicks: "
+                f"{payload['demo_state'].get('total_clicks', 0)} "
+                f"({payload['demo_state'].get('counters', {})})"
+            )
+        if payload.get("error"):
+            print(f"Error: {payload['error']}")
+    if not payload.get("success"):
+        raise SystemExit(1)
+
+
+def cmd_demo(args):
+    """Dispatch demo subcommands."""
+    if args.demo_action == "pack":
+        cmd_demo_pack(args)
+        return
+    if args.demo_action == "launch":
+        cmd_demo_launch(args)
+        return
+    if args.demo_action == "smoke":
+        cmd_demo_smoke(args)
+        return
+    print("Use `mousecoords demo pack`, `mousecoords demo launch`, or `mousecoords demo smoke`.")
+    raise SystemExit(1)
+
+
 def cmd_ocr(args):
     """Read text from a screen region using OCR."""
     pyautogui = _load_pyautogui("ocr")
@@ -630,6 +708,23 @@ def main():
     p_studio_new.add_argument("--from-profile", help="Existing profile name or path to copy from")
     p_studio_new.add_argument("--force", action="store_true", help="Overwrite an existing non-empty output directory")
 
+    # demo
+    p_demo = sub.add_parser("demo", help="Launch a deterministic walkthrough target and scaffold its profile pack")
+    p_demo_sub = p_demo.add_subparsers(dest="demo_action")
+    p_demo_launch = p_demo_sub.add_parser("launch", help="Open the built-in demo target app")
+    p_demo_launch.add_argument("--state-file", help="Write demo state as JSON for verification")
+    p_demo_launch.add_argument("--ready-file", help="Write a sentinel file when the demo window is ready")
+    p_demo_launch.add_argument("--duration", type=float, default=None, help="Auto-close after N seconds")
+    p_demo_pack = p_demo_sub.add_parser("pack", help="Create a profile pack for the built-in demo target")
+    p_demo_pack.add_argument("--output", required=True, help="Directory for the demo profile pack")
+    p_demo_pack.add_argument("--name", default="demo_lab", help="Profile name to write")
+    p_demo_pack.add_argument("--force", action="store_true", help="Overwrite an existing non-empty output directory")
+    p_demo_smoke = p_demo_sub.add_parser("smoke", help="Run the built-in demo app and automation end-to-end")
+    p_demo_smoke.add_argument("-p", "--profile", help="Optional profile name or YAML path (defaults to a temp demo pack)")
+    p_demo_smoke.add_argument("--debug", action="store_true", help="Export a debug bundle during the smoke run")
+    p_demo_smoke.add_argument("--bundle-dir", help="Directory for any generated debug bundles")
+    p_demo_smoke.add_argument("--json", action="store_true", help="Print structured JSON output")
+
     # watch
     p_watch = sub.add_parser("watch", help="Monitor a pixel for color changes")
     p_watch.add_argument("-x", type=int, default=None, help="X coordinate")
@@ -658,6 +753,7 @@ def main():
         "watch": cmd_watch,
         "bundle": cmd_bundle,
         "studio": cmd_studio,
+        "demo": cmd_demo,
     }
 
     if args.command == "bundle" and args.bundle_action != "inspect":
@@ -665,6 +761,9 @@ def main():
         return
     if args.command == "studio" and args.studio_action != "new":
         p_studio.print_help()
+        return
+    if args.command == "demo" and args.demo_action not in {"launch", "pack", "smoke"}:
+        p_demo.print_help()
         return
 
     if args.command in commands:

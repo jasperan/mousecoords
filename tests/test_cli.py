@@ -41,6 +41,7 @@ class TestCLIHelp:
         )
         assert result.returncode == 0, result.stderr
         assert "usage:" in result.stdout.lower()
+        assert "demo" in result.stdout
 
 
 class TestDoctorCommand:

@@ -42,6 +42,17 @@ def test_create_studio_project_from_profile(tmp_path, sample_profile):
     assert project.source.endswith("source.yaml")
 
 
+def test_create_studio_project_from_bundled_demo_profile(tmp_path):
+    project = create_studio_project(
+        tmp_path / "copied_demo",
+        from_profile="desktop_demo",
+    )
+
+    profile = load_profile(str(project.profile_path))
+    assert profile.name == "desktop_demo"
+    assert [button.name for button in profile.buttons] == ["Harvest", "Boost", "Reset"]
+
+
 def test_create_studio_project_refuses_nonempty_dir_without_force(tmp_path):
     output_dir = tmp_path / "occupied"
     output_dir.mkdir()

@@ -1,0 +1,95 @@
+"""Tests for the built-in demo target and smoke workflow."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+from mousecoords.demo import create_demo_project
+
+
+XVFB_RUN = shutil.which("xvfb-run")
+
+
+def test_create_demo_project(tmp_path):
+    profile_path = create_demo_project(tmp_path / "demo_pack", name="demo_pack")
+
+    assert profile_path.exists()
+    assert profile_path.name == "profile.yaml"
+    assert (tmp_path / "demo_pack" / "assets" / "templates" / ".gitkeep").exists()
+    assert (tmp_path / "demo_pack" / "assets" / "reference" / ".gitkeep").exists()
+
+
+@pytest.mark.skipif(XVFB_RUN is None, reason="xvfb-run not available")
+def test_demo_launch_writes_ready_and_state_files(tmp_path):
+    env = os.environ.copy()
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+    state_file = tmp_path / "state.json"
+    ready_file = tmp_path / "ready.txt"
+
+    result = subprocess.run(
+        [
+            XVFB_RUN,
+            "-a",
+            sys.executable,
+            "-m",
+            "mousecoords",
+            "demo",
+            "launch",
+            "--state-file",
+            str(state_file),
+            "--ready-file",
+            str(ready_file),
+            "--duration",
+            "0.4",
+        ],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert ready_file.exists()
+    payload = json.loads(state_file.read_text())
+    assert payload["title"] == "mousecoords Demo Lab"
+    assert payload["total_clicks"] == 0
+
+
+@pytest.mark.skipif(XVFB_RUN is None, reason="xvfb-run not available")
+def test_demo_smoke_succeeds_end_to_end():
+    env = os.environ.copy()
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+
+    result = subprocess.run(
+        [
+            XVFB_RUN,
+            "-a",
+            sys.executable,
+            "-m",
+            "mousecoords",
+            "demo",
+            "smoke",
+            "--json",
+        ],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["automation"]["stats"]["Total Clicks"] >= 3
+    assert payload["demo_state"]["total_clicks"] >= 3
+

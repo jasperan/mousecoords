@@ -1,0 +1,30 @@
+name: desktop_demo
+game: mousecoords Demo Lab
+resolution: [1280, 1024]
+poll_interval: 0.05
+color_tolerance: 8
+buttons:
+  - name: Harvest
+    x: 182
+    y: 232
+    color: [220, 70, 70]
+    action: click
+    cooldown: 0.2
+  - name: Boost
+    x: 302
+    y: 232
+    color: [70, 170, 70]
+    action: click
+    cooldown: 0.2
+  - name: Reset
+    x: 422
+    y: 232
+    color: [70, 120, 220]
+    action: click
+    cooldown: 0.2
+states:
+  - name: default
+    monitor_buttons: [Harvest, Boost, Reset]
+    transitions: {}
+    max_actions: {}
+ocr_regions: {}
