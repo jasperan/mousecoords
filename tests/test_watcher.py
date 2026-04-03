@@ -41,24 +41,24 @@ class TestWatcherInit:
 
 
 class TestCheckOnce:
-    @patch("mousecoords.watcher.pyautogui")
-    def test_first_call_returns_none(self, mock_pa):
+    @patch("mousecoords.watcher.capture_screen")
+    def test_first_call_returns_none(self, mock_capture):
         """First check establishes baseline, returns None."""
         fake_img = MagicMock()
         fake_img.getpixel.return_value = (100, 100, 100, 255)
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         w = ScreenWatcher(0, 0)
         result = w.check_once()
         assert result is None
         assert w._last_color == (100, 100, 100)
 
-    @patch("mousecoords.watcher.pyautogui")
-    def test_no_change(self, mock_pa):
+    @patch("mousecoords.watcher.capture_screen")
+    def test_no_change(self, mock_capture):
         """No change when color stays the same."""
         fake_img = MagicMock()
         fake_img.getpixel.return_value = (100, 100, 100, 255)
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         w = ScreenWatcher(0, 0, threshold=10.0)
         w.check_once()  # baseline
@@ -66,11 +66,11 @@ class TestCheckOnce:
         assert result is None
         assert w.change_count == 0
 
-    @patch("mousecoords.watcher.pyautogui")
-    def test_detects_change(self, mock_pa):
+    @patch("mousecoords.watcher.capture_screen")
+    def test_detects_change(self, mock_capture):
         """Detects when color changes beyond threshold."""
         fake_img = MagicMock()
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         w = ScreenWatcher(0, 0, threshold=10.0)
 
@@ -84,11 +84,11 @@ class TestCheckOnce:
         assert result == (200, 200, 200)
         assert w.change_count == 1
 
-    @patch("mousecoords.watcher.pyautogui")
-    def test_callback_fired(self, mock_pa):
+    @patch("mousecoords.watcher.capture_screen")
+    def test_callback_fired(self, mock_capture):
         """Callback is called on change detection."""
         fake_img = MagicMock()
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
         callback = MagicMock()
 
         w = ScreenWatcher(0, 0, threshold=5.0)
@@ -105,11 +105,11 @@ class TestCheckOnce:
         assert args[0] == (0, 0, 0)       # old color
         assert args[1] == (255, 255, 255)  # new color
 
-    @patch("mousecoords.watcher.pyautogui")
-    def test_history_recorded(self, mock_pa):
+    @patch("mousecoords.watcher.capture_screen")
+    def test_history_recorded(self, mock_capture):
         """Changes are recorded in history."""
         fake_img = MagicMock()
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         w = ScreenWatcher(0, 0, threshold=5.0)
 

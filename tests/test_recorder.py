@@ -137,12 +137,12 @@ class TestMacroPersistence:
 
 
 class TestConditionPlayback:
-    @patch("mousecoords.recorder.pyautogui")
-    def test_condition_met_immediately(self, mock_pa):
+    @patch("mousecoords.recorder.capture_screen")
+    def test_condition_met_immediately(self, mock_capture):
         """Condition passes when pixel color matches."""
         fake_img = MagicMock()
         fake_img.getpixel.return_value = (255, 0, 0, 255)
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         r = MacroRecorder()
         event = Event(
@@ -155,12 +155,12 @@ class TestConditionPlayback:
         # Should not raise or hang
         r._wait_for_condition(event, timeout=1.0)
 
-    @patch("mousecoords.recorder.pyautogui")
-    def test_condition_timeout(self, mock_pa):
+    @patch("mousecoords.recorder.capture_screen")
+    def test_condition_timeout(self, mock_capture):
         """Condition times out when color never matches."""
         fake_img = MagicMock()
         fake_img.getpixel.return_value = (0, 0, 0, 255)  # wrong color
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         r = MacroRecorder()
         event = Event(
@@ -177,12 +177,13 @@ class TestConditionPlayback:
         elapsed = time.time() - start
         assert elapsed >= 0.25  # respected the timeout
 
+    @patch("mousecoords.recorder.capture_screen")
     @patch("mousecoords.recorder.pyautogui")
-    def test_playback_executes_condition(self, mock_pa):
+    def test_playback_executes_condition(self, mock_pa, mock_capture):
         """Full playback handles CONDITION events."""
         fake_img = MagicMock()
         fake_img.getpixel.return_value = (255, 0, 0, 255)
-        mock_pa.screenshot.return_value = fake_img
+        mock_capture.return_value = fake_img
 
         r = MacroRecorder()
         r.add_condition(50, 60, (255, 0, 0))

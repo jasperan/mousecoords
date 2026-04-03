@@ -1,5 +1,6 @@
 """Tests for the system diagnostics module."""
 
+import builtins
 import pytest
 from unittest.mock import patch
 
@@ -56,6 +57,24 @@ class TestIndividualChecks:
         result = check_pynput()
         assert result.name == "pynput"
         assert isinstance(result.passed, bool)
+
+    def test_check_pynput_reports_gui_requirement(self):
+        real_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pynput":
+                raise ImportError(
+                    "this platform is not supported: ('failed to acquire X connection: "
+                    "Bad display name \"\"', DisplayNameError(''))"
+                )
+            return real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            result = check_pynput()
+
+        assert result.name == "pynput"
+        assert result.passed is False
+        assert result.detail == "requires an active DISPLAY/GUI session"
 
 
 class TestCollectDiagnostics:

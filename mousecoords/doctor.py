@@ -7,6 +7,8 @@ import shutil
 import sys
 from dataclasses import dataclass
 
+from .screen import capture_screen
+
 
 @dataclass
 class CheckResult:
@@ -19,9 +21,18 @@ class CheckResult:
 
 def _format_gui_error(exc: Exception) -> str:
     """Normalize display-related import/runtime failures into readable output."""
+    message = str(exc)
     if isinstance(exc, KeyError) and exc.args == ("DISPLAY",):
         return "requires an active DISPLAY/GUI session"
-    return str(exc)
+    gui_markers = (
+        "display",
+        "x server",
+        "failed to acquire x connection",
+        "display environment variable is set correctly",
+    )
+    if any(marker in message.lower() for marker in gui_markers):
+        return "requires an active DISPLAY/GUI session"
+    return message
 
 
 def check_display() -> CheckResult:
@@ -47,8 +58,7 @@ def check_pyautogui() -> CheckResult:
 
 def check_screenshot() -> CheckResult:
     try:
-        import pyautogui
-        pyautogui.screenshot(region=(0, 0, 1, 1))
+        capture_screen(region=(0, 0, 1, 1))
         return CheckResult("screenshot", True, "capture working")
     except Exception as e:
         return CheckResult("screenshot", False, _format_gui_error(e))
@@ -87,10 +97,15 @@ def check_pynput() -> CheckResult:
     try:
         from pynput import mouse  # noqa: F401
         return CheckResult("pynput", True, "installed", required=False)
-    except ImportError:
+    except ImportError as e:
+        detail = _format_gui_error(e)
+        if detail == "requires an active DISPLAY/GUI session":
+            return CheckResult("pynput", False, detail, required=False)
         return CheckResult("pynput", False,
                            "not installed (pip install mousecoords[record])",
                            required=False)
+    except Exception as e:
+        return CheckResult("pynput", False, _format_gui_error(e), required=False)
 
 
 def check_keyboard() -> CheckResult:

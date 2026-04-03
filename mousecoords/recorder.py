@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Callable
 
 import pyautogui
+from .screen import capture_screen
 
 try:
     from pynput import mouse, keyboard as kb
@@ -259,7 +260,7 @@ class MacroRecorder:
         tolerance = event.color_tolerance
 
         while time.time() < deadline:
-            img = pyautogui.screenshot(region=(event.x, event.y, 1, 1))
+            img = capture_screen(region=(event.x, event.y, 1, 1))
             actual = img.getpixel((0, 0))[:3]
             if all(abs(a - b) <= tolerance
                    for a, b in zip(actual, event.check_color)):

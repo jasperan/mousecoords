@@ -7,6 +7,7 @@ from typing import Optional
 from pathlib import Path
 
 import pyautogui
+from .screen import capture_screen
 
 try:
     import numpy as np
@@ -39,7 +40,7 @@ class VisionEngine:
 
     def screenshot(self, region: Optional[tuple] = None):
         """Capture screen (or region) as numpy BGR array (or PIL if no cv2)."""
-        img = pyautogui.screenshot(region=region)
+        img = capture_screen(region=region)
         if HAS_CV2:
             return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         return img
@@ -50,7 +51,7 @@ class VisionEngine:
 
     def get_pixel_color(self, x: int, y: int) -> tuple:
         """Get RGB color at screen coordinates. Works on any OS."""
-        img = pyautogui.screenshot(region=(x, y, 1, 1))
+        img = capture_screen(region=(x, y, 1, 1))
         pixel = img.getpixel((0, 0))
         return pixel[:3]
 
@@ -103,7 +104,7 @@ class VisionEngine:
             from PIL import Image
             if not isinstance(template, Image.Image):
                 template = Image.fromarray(template)
-            loc = pyautogui.locate(template, pyautogui.screenshot(region=region))
+            loc = pyautogui.locate(template, capture_screen(region=region))
             return tuple(loc) if loc else None
 
         screen = self.screenshot(region)

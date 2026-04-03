@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Optional, Callable
 
-import pyautogui
+from .screen import capture_screen
 
 
 class ScreenWatcher:
@@ -35,7 +35,7 @@ class ScreenWatcher:
     @staticmethod
     def get_pixel_color(x: int, y: int) -> tuple:
         """Get RGB color at screen coordinates."""
-        img = pyautogui.screenshot(region=(x, y, 1, 1))
+        img = capture_screen(region=(x, y, 1, 1))
         return img.getpixel((0, 0))[:3]
 
     @staticmethod

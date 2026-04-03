@@ -18,11 +18,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import time
 from importlib import import_module
 from pathlib import Path
+from queue import Queue
 from threading import Thread, Event as ThreadEvent
 
 from .config import (
@@ -68,6 +70,77 @@ def _install_signal_handlers():
     signal.signal(signal.SIGTERM, _handler)
 
 
+def _keyboard_module_usable() -> bool:
+    """The keyboard module needs root on Linux, but is fine elsewhere."""
+    return sys.platform != "linux" or os.geteuid() == 0
+
+
+def _normalize_key_name(key) -> str | None:
+    """Normalize keyboard or pynput key objects into lowercase names."""
+    if isinstance(key, str):
+        return key.lower()
+
+    name = getattr(key, "name", None)
+    if name:
+        return str(name).lower()
+
+    char = getattr(key, "char", None)
+    if char:
+        return str(char).lower()
+
+    vk = getattr(key, "vk", None)
+    if vk == 32:
+        return "space"
+
+    return None
+
+
+def _read_keypress(valid_keys: set[str]) -> str:
+    """Wait for one of the requested keys using keyboard or pynput."""
+    valid = {key.lower() for key in valid_keys}
+
+    if _keyboard_module_usable():
+        try:
+            import keyboard
+            while True:
+                event = keyboard.read_event(suppress=False)
+                if event.event_type != "down":
+                    continue
+                name = _normalize_key_name(event.name)
+                if name in valid:
+                    return name
+        except Exception:
+            pass
+
+    try:
+        from pynput import keyboard as pyn_keyboard
+    except ImportError as exc:
+        options = ", ".join(sorted(valid))
+        raise RuntimeError(
+            f"Keyboard input requires root on Linux or the optional pynput dependency. "
+            f"Install mousecoords[record] or run with sudo. Waiting for: {options}."
+        ) from exc
+
+    pressed: Queue[str] = Queue()
+
+    def _on_press(key):
+        name = _normalize_key_name(key)
+        if name in valid:
+            pressed.put(name)
+            return False
+        return None
+
+    with pyn_keyboard.Listener(on_press=_on_press) as listener:
+        name = pressed.get()
+        listener.stop()
+        return name
+
+
+def _wait_for_key(key_name: str):
+    """Wait until a specific key is pressed."""
+    return _read_keypress({key_name})
+
+
 # ======================================================================
 # Commands
 # ======================================================================
@@ -75,8 +148,6 @@ def _install_signal_handlers():
 def cmd_coords(args):
     """Enhanced coordinate grabber with color readout."""
     pyautogui = _load_pyautogui("coords")
-
-    import keyboard
     from .vision import VisionEngine
 
     vision = VisionEngine()
@@ -85,12 +156,10 @@ def cmd_coords(args):
     print("-" * 45)
 
     while True:
-        event = keyboard.read_event(suppress=False)
-        if event.event_type != "down":
-            continue
-        if event.name == "q":
+        key = _read_keypress({"space", "q"})
+        if key == "q":
             break
-        if event.name == "space":
+        if key == "space":
             x, y = pyautogui.position()
             color = vision.get_pixel_color(x, y)
             print(f"  ({x:>5}, {y:>5})  RGB{color}")
@@ -335,20 +404,18 @@ def cmd_play(args):
 def cmd_capture(args):
     """Capture a button template for CV-based detection."""
     pyautogui = _load_pyautogui("capture")
-
-    import keyboard
     from .vision import VisionEngine
 
     vision = VisionEngine()
 
     print("mousecoords -- Template Capture")
     print("Position mouse at TOP-LEFT of button, press SPACE")
-    keyboard.wait("space")
+    _wait_for_key("space")
     x1, y1 = pyautogui.position()
     print(f"  Top-left: ({x1}, {y1})")
 
     print("Position mouse at BOTTOM-RIGHT, press SPACE")
-    keyboard.wait("space")
+    _wait_for_key("space")
     x2, y2 = pyautogui.position()
     print(f"  Bottom-right: ({x2}, {y2})")
 
@@ -400,20 +467,18 @@ def cmd_profile(args):
 def cmd_ocr(args):
     """Read text from a screen region using OCR."""
     pyautogui = _load_pyautogui("ocr")
-
-    import keyboard
     from .vision import VisionEngine
 
     vision = VisionEngine()
 
     print("mousecoords -- OCR Reader")
     print("Position at TOP-LEFT of text region, press SPACE")
-    keyboard.wait("space")
+    _wait_for_key("space")
     x1, y1 = pyautogui.position()
     print(f"  Top-left: ({x1}, {y1})")
 
     print("Position at BOTTOM-RIGHT, press SPACE")
-    keyboard.wait("space")
+    _wait_for_key("space")
     x2, y2 = pyautogui.position()
     print(f"  Bottom-right: ({x2}, {y2})")
 
@@ -437,15 +502,10 @@ def cmd_doctor(args):
 def cmd_watch(args):
     """Monitor a screen pixel for color changes."""
     if args.pick:
-        try:
-            import keyboard
-        except ImportError:
-            print("keyboard module required for --pick. Run: mousecoords doctor")
-            sys.exit(1)
         pyautogui = _load_pyautogui("watch")
         print("mousecoords -- Screen Watcher")
         print("Position mouse at the pixel to watch, press SPACE")
-        keyboard.wait("space")
+        _wait_for_key("space")
         x, y = pyautogui.position()
     else:
         x, y = args.x, args.y
