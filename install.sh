@@ -76,14 +76,32 @@ check_prereqs() {
 
 install_deps() {
     cd "$INSTALL_DIR"
+    CREATED_VENV=0
     if [ ! -d ".venv" ]; then
         info "Creating virtual environment..."
-        $PYTHON -m venv .venv
+        if $PYTHON -m virtualenv --version >/dev/null 2>&1; then
+            $PYTHON -m virtualenv .venv >/dev/null
+        else
+            $PYTHON -m venv .venv
+        fi
+        CREATED_VENV=1
     else
         info "Using existing virtual environment..."
     fi
     # shellcheck disable=SC1091
     source .venv/bin/activate
+
+    if ! python -c "import setuptools" >/dev/null 2>&1; then
+        if [ "$CREATED_VENV" -eq 1 ]; then
+            warn "Virtual environment does not include setuptools; recreating with system site-packages."
+            rm -rf .venv
+            $PYTHON -m venv --system-site-packages .venv
+            # shellcheck disable=SC1091
+            source .venv/bin/activate
+        fi
+    fi
+
+    python -c "import setuptools" >/dev/null 2>&1 || fail "setuptools is unavailable in the virtual environment. Install python3-setuptools or use a Python distribution that bundles it."
 
     info "Installing dependencies..."
     if ! pip install --upgrade pip setuptools wheel -q; then
