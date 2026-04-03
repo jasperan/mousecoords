@@ -7,6 +7,9 @@ What started as a 5-line coordinate grabber is now a full automation platform:
 - **Computer Vision** — find buttons by template matching (OpenCV), not hardcoded pixels
 - **OCR** — read numbers and text from the screen with Tesseract
 - **Macro Record/Replay** — record mouse and keyboard, save as JSON, replay at any speed
+- **Safe Run Mode** — dry-run profiles, bound runs by duration, and emit JSON summaries
+- **Debug Bundles** — capture manifests, stats, doctor output, and screenshots for bug reports
+- **Studio Scaffolds** — bootstrap profile-pack directories that are ready for templates and reference captures
 - **Visual Overlay** — transparent HUD with crosshair, button markers, and status
 - **State Machine** — structured game automation with named phases and transitions
 - **Rich Dashboard** — live terminal UI with stats, event log, and button status
@@ -140,6 +143,27 @@ mousecoords profile validate my_game.yaml --json
 Validation catches broken template paths, bad state references, duplicate button/state
 names, invalid OCR regions, and malformed button metadata before you start a run.
 
+### Studio scaffold
+
+```bash
+# Create a blank profile-pack scaffold
+mousecoords studio new --output profiles/calculator
+
+# Copy an existing profile into a pack directory
+mousecoords studio new --output profiles/calculator --from-profile antimatter_dimensions
+```
+
+This creates:
+
+```text
+profiles/
+  calculator/
+    profile.yaml
+    assets/
+      templates/
+      reference/
+```
+
 ## Profiles
 
 Profiles are YAML files in `profiles/` that define everything about an automation target:
@@ -173,6 +197,9 @@ ocr_regions:
 
 Profiles auto-scale coordinates when `resolution` differs from your screen.
 
+Anywhere a profile path is accepted, you can point at a flat YAML file, a pack's
+`profile.yaml`, or the pack directory itself.
+
 ## Debug Bundles
 
 When a run behaves unexpectedly, export a reproducible bundle:
@@ -190,9 +217,12 @@ and a screenshot when capture succeeds.
 ```
 mousecoords/
 ├── config.py          # YAML profile system with resolution scaling
+├── runtime.py         # shared run/automate execution engine
+├── bundles.py         # debug bundle export + inspection
 ├── vision.py          # OpenCV template matching + Tesseract OCR
 ├── recorder.py        # Input recording and replay engine
 ├── overlay.py         # Transparent tkinter HUD overlay
+├── studio.py          # profile-pack scaffold creation
 ├── state_machine.py   # FSM with phases, limits, and transitions
 ├── tui.py             # Rich live dashboard
 └── automator.py       # CLI entry point orchestrating everything

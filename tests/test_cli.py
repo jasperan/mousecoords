@@ -150,6 +150,18 @@ class TestProfileCommand:
         assert exc_info.value.code == 1
         assert "could not be loaded" in captured.out.lower()
 
+    def test_profile_validate_malformed_yaml_exits_cleanly(self, capsys, tmp_path):
+        malformed = tmp_path / "broken.yaml"
+        malformed.write_text("name: [unterminated\n")
+        with patch("sys.argv", ["mousecoords", "profile", "validate", str(malformed), "--json"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exc_info.value.code == 1
+        assert payload["ok"] is False
+        assert payload["issues"][0]["code"] == "profile_load_failed"
+
 
 class TestRunCommand:
     def test_run_dispatches_to_shared_command(self):

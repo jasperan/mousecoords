@@ -282,7 +282,7 @@ def cmd_profile_validate(args):
     target = args.name or args.target or args.path or get_default_profile().name
     try:
         profile, resolved_path = _resolve_profile(target)
-    except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+    except Exception as exc:
         payload = {
             "profile_name": target,
             "source": str(target),

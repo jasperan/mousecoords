@@ -178,9 +178,11 @@ def resolve_profile_target(target: Optional[str] = None) -> tuple[Profile, Optio
                 return load_profile(str(pack_path)), pack_path, str(pack_path)
             return load_profile(str(explicit_path)), explicit_path, str(explicit_path)
 
-        named_path = get_profiles_dir() / f"{target}.yaml"
-        if named_path.exists():
-            return load_profile(str(named_path)), named_path, str(named_path)
+        named_path = None
+        if explicit_path.suffix != ".yaml":
+            named_path = get_profiles_dir() / f"{target}.yaml"
+            if named_path.exists():
+                return load_profile(str(named_path)), named_path, str(named_path)
 
         pack_path = _pack_profile_path(get_profiles_dir() / target)
         if pack_path.exists():
@@ -189,8 +191,9 @@ def resolve_profile_target(target: Optional[str] = None) -> tuple[Profile, Optio
         if is_default_profile_name(target):
             return get_default_profile(), None, "builtin default profile"
 
+        expected = named_path if named_path is not None else explicit_path
         raise FileNotFoundError(
-            f"Profile '{target}' not found. Expected a YAML path or {named_path}."
+            f"Profile '{target}' not found. Expected a YAML path or {expected}."
         )
 
     default_path = get_profiles_dir() / f"{DEFAULT_PROFILE_NAME}.yaml"
@@ -257,9 +260,11 @@ def resolve_profile_reference(reference: Optional[str] = None) -> tuple[Profile,
                 return load_profile(str(pack_path)), str(pack_path)
             return load_profile(str(explicit_path)), str(explicit_path)
 
-        named_path = get_profiles_dir() / f"{reference}.yaml"
-        if named_path.exists():
-            return load_profile(str(named_path)), str(named_path)
+        named_path = None
+        if explicit_path.suffix != ".yaml":
+            named_path = get_profiles_dir() / f"{reference}.yaml"
+            if named_path.exists():
+                return load_profile(str(named_path)), str(named_path)
 
         pack_path = _pack_profile_path(get_profiles_dir() / reference)
         if pack_path.exists():
@@ -268,8 +273,9 @@ def resolve_profile_reference(reference: Optional[str] = None) -> tuple[Profile,
         if is_default_profile_name(reference):
             return get_default_profile(), f"builtin:{reference}"
 
+        expected = named_path if named_path is not None else explicit_path
         raise FileNotFoundError(
-            f"Profile '{reference}' not found. Run 'mousecoords profile list' to see available profiles."
+            f"Profile '{reference}' not found. Run 'mousecoords profile list' or provide {expected}."
         )
 
     default_name = get_default_profile().name
