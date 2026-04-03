@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -24,6 +25,15 @@ def test_create_demo_project(tmp_path):
     assert profile_path.name == "profile.yaml"
     assert (tmp_path / "demo_pack" / "assets" / "templates" / ".gitkeep").exists()
     assert (tmp_path / "demo_pack" / "assets" / "reference" / ".gitkeep").exists()
+
+
+def test_create_demo_project_does_not_require_named_profile_lookup(tmp_path):
+    with patch("mousecoords.studio.resolve_profile_target", side_effect=AssertionError("should not resolve")):
+        profile_path = create_demo_project(tmp_path / "standalone_pack", name="standalone_pack")
+
+    payload = profile_path.read_text()
+    assert "standalone_pack" in payload
+    assert "Harvest" in payload
 
 
 @pytest.mark.skipif(XVFB_RUN is None, reason="xvfb-run not available")

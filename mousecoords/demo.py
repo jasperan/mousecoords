@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import load_profile, save_profile
+from .config import ButtonConfig, Profile, StateConfig, save_profile
 from .studio import create_studio_project
 
 DEMO_PROFILE_NAME = "desktop_demo"
@@ -36,6 +36,38 @@ def get_demo_profile_dir() -> Path:
 def get_demo_profile_path() -> Path:
     """Return the canonical profile file for the bundled demo scenario."""
     return get_demo_profile_dir() / "profile.yaml"
+
+
+def build_demo_profile(*, name: str = DEMO_PROFILE_NAME) -> Profile:
+    """Return a ready-to-run profile for the built-in demo target."""
+    buttons = [
+        ButtonConfig(
+            name=button["name"],
+            x=DEMO_WINDOW_X + ((button["x1"] + button["x2"]) // 2),
+            y=DEMO_WINDOW_Y + ((button["y1"] + button["y2"]) // 2),
+            color=button["color"],
+            cooldown=0.2,
+        )
+        for button in DEMO_BUTTONS
+    ]
+    states = [
+        StateConfig(
+            name="default",
+            monitor_buttons=[button["name"] for button in DEMO_BUTTONS],
+            transitions={},
+            max_actions={},
+        )
+    ]
+    return Profile(
+        name=name,
+        game=DEMO_WINDOW_TITLE,
+        resolution=(1280, 1024),
+        poll_interval=0.05,
+        color_tolerance=8,
+        buttons=buttons,
+        states=states,
+        ocr_regions={},
+    )
 
 
 def read_demo_state(path: str | Path | None) -> dict[str, Any]:
@@ -64,15 +96,8 @@ def create_demo_project(
     force: bool = False,
 ) -> Path:
     """Create a scaffolded profile pack wired to the built-in demo target."""
-    project = create_studio_project(
-        output_dir,
-        name=name,
-        from_profile=DEMO_PROFILE_NAME,
-        force=force,
-    )
-    profile = load_profile(str(project.profile_path))
-    profile.name = name
-    save_profile(profile, str(project.profile_path))
+    project = create_studio_project(output_dir, name=name, force=force)
+    save_profile(build_demo_profile(name=name), str(project.profile_path))
     return project.profile_path
 
 
