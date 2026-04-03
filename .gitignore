@@ -153,8 +153,12 @@ dmypy.json
 cython_debug/
 
 # mousecoords
+.codex
 .agents/
+.codex/
 .claude/
+.omx
+.omx/
 .omc/
 .crush/
 .openhands/
@@ -168,6 +172,14 @@ dogfood-output/
 task_plan.md
 findings.md
 progress.md
+IMPLEMENTATION.md
+IMPLEMENTATION-*.md
+PLAN.md
+PLAN-*.md
+AUTOPILOT.md
+AUTOPILOT-*.md
+DEEP-INTERVIEW.md
+DEEP-INTERVIEW-*.md
 .playwright-mcp/
 
 # PyCharm

@@ -69,6 +69,9 @@ mousecoords coords
 ### Game automation
 
 ```bash
+# Safe preview mode (no clicking, single cycle, JSON summary)
+mousecoords run -p my_game --dry-run --once --json
+
 # Default profile (Antimatter Dimensions)
 mousecoords automate
 
@@ -77,6 +80,10 @@ mousecoords automate -p my_game
 
 # With visual overlay and OCR
 mousecoords automate --overlay --ocr
+
+# Bounded runs and debug bundles
+mousecoords automate -p my_game --duration 30 --debug --bundle-dir bundles
+mousecoords bundle inspect bundles/run-20260403T031431Z.zip --json
 
 # Simple mode (no Rich dashboard)
 mousecoords automate --simple
@@ -126,7 +133,12 @@ mousecoords ocr
 mousecoords profile list       # list available profiles
 mousecoords profile create     # generate default YAML
 mousecoords profile show       # display profile contents
+mousecoords profile validate   # validate the default/built-in profile
+mousecoords profile validate my_game.yaml --json
 ```
+
+Validation catches broken template paths, bad state references, duplicate button/state
+names, invalid OCR regions, and malformed button metadata before you start a run.
 
 ## Profiles
 
@@ -160,6 +172,18 @@ ocr_regions:
 ```
 
 Profiles auto-scale coordinates when `resolution` differs from your screen.
+
+## Debug Bundles
+
+When a run behaves unexpectedly, export a reproducible bundle:
+
+```bash
+mousecoords run -p my_game --duration 10 --debug --bundle-dir bundles
+mousecoords bundle inspect bundles/run-20260403T031431Z.zip --json
+```
+
+Bundles include the manifest, serialized profile, doctor output, final stats, action log,
+and a screenshot when capture succeeds.
 
 ## Architecture
 
