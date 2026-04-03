@@ -267,7 +267,6 @@ def run_demo_smoke(
             create_demo_project(profile_target, name="demo_lab")
 
         env = os.environ.copy()
-        env.setdefault("PYTHONPATH", str(Path.cwd()))
         app = subprocess.Popen(
             [
                 sys.executable,

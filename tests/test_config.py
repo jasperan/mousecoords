@@ -6,7 +6,7 @@ from pathlib import Path
 from mousecoords.config import (
     Profile, ButtonConfig, StateConfig,
     load_profile, save_profile, list_profiles,
-    get_profiles_dir, get_default_profile, DEFAULT_PROFILE_NAME,
+    get_profiles_dir, get_default_profile, get_demo_profile, DEFAULT_PROFILE_NAME, DEMO_PROFILE_NAME,
     resolve_profile_target, validate_profile,
 )
 
@@ -103,7 +103,7 @@ class TestListProfiles:
     def test_list_profiles_includes_builtin_default_when_dir_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: tmp_path / "missing")
         profiles = list_profiles()
-        assert profiles == [DEFAULT_PROFILE_NAME]
+        assert profiles == [DEFAULT_PROFILE_NAME, DEMO_PROFILE_NAME]
 
     def test_profiles_dir_exists(self):
         d = get_profiles_dir()
@@ -127,6 +127,16 @@ class TestDefaultProfile:
     def test_default_has_ocr_regions(self):
         p = get_default_profile()
         assert "antimatter_count" in p.ocr_regions
+
+
+class TestDemoProfile:
+    def test_demo_profile_has_buttons(self):
+        profile = get_demo_profile()
+        assert [button.name for button in profile.buttons] == ["Harvest", "Boost", "Reset"]
+
+    def test_demo_profile_has_single_default_state(self):
+        profile = get_demo_profile()
+        assert [state.name for state in profile.states] == ["default"]
 
 
 class TestResolveProfileTarget:
@@ -163,6 +173,13 @@ class TestResolveProfileTarget:
         assert profile.name == sample_profile.name
         assert path == pack_dir / "profile.yaml"
         assert source.endswith("explicit_pack/profile.yaml")
+
+    def test_resolve_builtin_demo_when_profiles_dir_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: tmp_path / "missing")
+        profile, path, source = resolve_profile_target(DEMO_PROFILE_NAME)
+        assert profile.name == DEMO_PROFILE_NAME
+        assert path is None
+        assert source == "builtin demo profile"
 
 
 class TestValidateProfile:

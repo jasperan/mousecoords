@@ -10,6 +10,7 @@ from typing import Optional
 from pathlib import Path
 
 DEFAULT_PROFILE_NAME = "antimatter_dimensions"
+DEMO_PROFILE_NAME = "desktop_demo"
 
 
 def _pack_profile_path(directory: Path) -> Path:
@@ -190,6 +191,8 @@ def resolve_profile_target(target: Optional[str] = None) -> tuple[Profile, Optio
 
         if is_default_profile_name(target):
             return get_default_profile(), None, "builtin default profile"
+        if is_demo_profile_name(target):
+            return get_demo_profile(), None, "builtin demo profile"
 
         expected = named_path if named_path is not None else explicit_path
         raise FileNotFoundError(
@@ -246,6 +249,31 @@ def get_profiles_dir() -> Path:
     return Path(__file__).parent.parent / "profiles"
 
 
+def get_demo_profile() -> Profile:
+    """Get the built-in deterministic desktop demo profile."""
+    return Profile(
+        name=DEMO_PROFILE_NAME,
+        game="mousecoords Demo Lab",
+        resolution=(1280, 1024),
+        poll_interval=0.05,
+        color_tolerance=8,
+        buttons=[
+            ButtonConfig("Harvest", 210, 240, (220, 70, 70), cooldown=0.2),
+            ButtonConfig("Boost", 330, 240, (70, 170, 70), cooldown=0.2),
+            ButtonConfig("Reset", 450, 240, (70, 120, 220), cooldown=0.2),
+        ],
+        states=[
+            StateConfig(
+                name="default",
+                monitor_buttons=["Harvest", "Boost", "Reset"],
+                transitions={},
+                max_actions={},
+            )
+        ],
+        ocr_regions={},
+    )
+
+
 def resolve_profile_reference(reference: Optional[str] = None) -> tuple[Profile, str]:
     """Resolve a profile name/path into a loaded profile and source label."""
     if reference:
@@ -272,6 +300,8 @@ def resolve_profile_reference(reference: Optional[str] = None) -> tuple[Profile,
 
         if is_default_profile_name(reference):
             return get_default_profile(), f"builtin:{reference}"
+        if is_demo_profile_name(reference):
+            return get_demo_profile(), f"builtin:{reference}"
 
         expected = named_path if named_path is not None else explicit_path
         raise FileNotFoundError(
@@ -290,6 +320,11 @@ def is_default_profile_name(name: str) -> bool:
     return name == DEFAULT_PROFILE_NAME
 
 
+def is_demo_profile_name(name: str) -> bool:
+    """Return True when a requested profile name is the built-in demo."""
+    return name == DEMO_PROFILE_NAME
+
+
 def list_profiles() -> list:
     """List available profile names."""
     profiles_dir = get_profiles_dir()
@@ -302,6 +337,8 @@ def list_profiles() -> list:
         )
     if DEFAULT_PROFILE_NAME not in names:
         names.append(DEFAULT_PROFILE_NAME)
+    if DEMO_PROFILE_NAME not in names:
+        names.append(DEMO_PROFILE_NAME)
     return sorted(set(names))
 
 

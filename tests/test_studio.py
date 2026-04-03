@@ -53,6 +53,18 @@ def test_create_studio_project_from_bundled_demo_profile(tmp_path):
     assert [button.name for button in profile.buttons] == ["Harvest", "Boost", "Reset"]
 
 
+def test_create_studio_project_from_builtin_demo_profile_when_profiles_dir_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: tmp_path / "missing")
+    project = create_studio_project(
+        tmp_path / "copied_demo_builtin",
+        from_profile="desktop_demo",
+    )
+
+    profile = load_profile(str(project.profile_path))
+    assert profile.name == "desktop_demo"
+    assert [button.name for button in profile.buttons] == ["Harvest", "Boost", "Reset"]
+
+
 def test_create_studio_project_refuses_nonempty_dir_without_force(tmp_path):
     output_dir = tmp_path / "occupied"
     output_dir.mkdir()

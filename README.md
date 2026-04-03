@@ -29,7 +29,8 @@ xvfb-run -a python -m mousecoords demo smoke --json
 
 # Same flow, but also capture a debug bundle you can inspect afterwards
 xvfb-run -a python -m mousecoords demo smoke --debug --bundle-dir bundles --json
-python -m mousecoords bundle inspect bundles/run-*.zip --json
+# then inspect the exact bundle_path returned by the previous JSON payload
+python -m mousecoords bundle inspect bundles/run-20260403T031431Z.zip --json
 ```
 
 If you want to drive the demo in separate steps, this works too:
@@ -251,6 +252,8 @@ mousecoords bundle inspect bundles/run-20260403T031431Z.zip --json
 
 Bundles include the manifest, serialized profile, doctor output, final stats, action log,
 and a screenshot when capture succeeds.
+
+Treat bundles as sensitive: screenshots and diagnostics may include visible on-screen data.
 
 ## Architecture
 

@@ -433,16 +433,16 @@ def cmd_profile(args):
     elif args.action == "show":
         name = args.name or args.target or get_default_profile().name
         try:
-            _, resolved_path, _ = resolve_profile_target(name)
+            profile, resolved_path, _ = resolve_profile_target(name)
         except FileNotFoundError:
+            profile = None
             resolved_path = None
 
         if resolved_path is not None:
             print(Path(resolved_path).read_text())
-        elif is_default_profile_name(name):
+        elif profile is not None:
             import yaml
 
-            profile = get_default_profile()
             data = profile_to_data(profile)
             print(yaml.dump(data, default_flow_style=False, sort_keys=False))
         else:

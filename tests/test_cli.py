@@ -102,6 +102,7 @@ class TestProfileCommand:
             main()
         captured = capsys.readouterr()
         assert "antimatter_dimensions" in captured.out
+        assert "desktop_demo" in captured.out
 
     def test_profile_show(self, capsys):
         with patch("sys.argv", ["mousecoords", "profile", "show"]):
@@ -115,6 +116,14 @@ class TestProfileCommand:
                 main()
         captured = capsys.readouterr()
         assert "antimatter_dimensions" in captured.out.lower()
+
+    def test_profile_show_builtin_demo_without_profiles_dir(self, capsys, tmp_path):
+        with patch("mousecoords.config.get_profiles_dir", return_value=tmp_path):
+            with patch("sys.argv", ["mousecoords", "profile", "show", "desktop_demo"]):
+                main()
+        captured = capsys.readouterr()
+        assert "desktop_demo" in captured.out.lower()
+        assert "Harvest" in captured.out
 
     def test_profile_show_missing(self, capsys):
         with patch("sys.argv", ["mousecoords", "profile", "show", "-n", "nonexistent_xyz"]):
