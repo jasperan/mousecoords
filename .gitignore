@@ -167,6 +167,7 @@ cython_debug/
 .worktrees/
 templates/*.png
 recordings/*.json
+bundles/
 docs/plans/
 dogfood-output/
 task_plan.md
