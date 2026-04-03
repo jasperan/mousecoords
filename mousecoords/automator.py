@@ -21,27 +21,29 @@ import argparse
 import signal
 import sys
 import time
+from importlib import import_module
 from pathlib import Path
 from threading import Thread, Event as ThreadEvent
-
-import pyautogui
 
 from .config import (
     load_profile, save_profile, get_default_profile,
     list_profiles, get_profiles_dir,
 )
-from .vision import VisionEngine
 from .state_machine import StateMachine, GamePhase
 from .tui import Dashboard, HAS_RICH
-from .recorder import MacroRecorder
-
-# Re-enable pyautogui failsafe (move mouse to corner to emergency-stop).
-# Users can disable with --no-failsafe if they know what they're doing.
-pyautogui.FAILSAFE = True
-pyautogui.PAUSE = 0
 
 # Global shutdown event for clean Ctrl+C handling
 _shutdown = ThreadEvent()
+
+
+def _load_pyautogui():
+    """Import pyautogui only when a command actually needs GUI access."""
+    pyautogui = import_module("pyautogui")
+    # Re-enable pyautogui failsafe (move mouse to corner to emergency-stop).
+    # Users can disable with --no-failsafe if they know what they're doing.
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0
+    return pyautogui
 
 
 def _install_signal_handlers():
@@ -59,7 +61,9 @@ def _install_signal_handlers():
 def cmd_coords(args):
     """Enhanced coordinate grabber with color readout."""
     import keyboard
+    from .vision import VisionEngine
 
+    pyautogui = _load_pyautogui()
     vision = VisionEngine()
     print("mousecoords -- Coordinate Grabber")
     print("Press SPACE to capture coordinates, Q to quit")
@@ -81,6 +85,9 @@ def cmd_coords(args):
 
 def cmd_automate(args):
     """Run game automation with vision, state machine, and TUI."""
+    from .vision import VisionEngine
+
+    pyautogui = _load_pyautogui()
     if args.no_failsafe:
         pyautogui.FAILSAFE = False
 
@@ -255,6 +262,8 @@ def cmd_automate(args):
 
 def cmd_record(args):
     """Record a macro."""
+    from .recorder import MacroRecorder
+
     recorder = MacroRecorder(record_moves=args.moves)
 
     print("mousecoords -- Macro Recorder")
@@ -282,6 +291,8 @@ def cmd_record(args):
 
 def cmd_play(args):
     """Play back a recorded macro."""
+    from .recorder import MacroRecorder
+
     recorder = MacroRecorder()
     recorder.load(args.input)
 
@@ -305,7 +316,9 @@ def cmd_play(args):
 def cmd_capture(args):
     """Capture a button template for CV-based detection."""
     import keyboard
+    from .vision import VisionEngine
 
+    pyautogui = _load_pyautogui()
     vision = VisionEngine()
 
     print("mousecoords -- Template Capture")
@@ -361,7 +374,9 @@ def cmd_profile(args):
 def cmd_ocr(args):
     """Read text from a screen region using OCR."""
     import keyboard
+    from .vision import VisionEngine
 
+    pyautogui = _load_pyautogui()
     vision = VisionEngine()
 
     print("mousecoords -- OCR Reader")
@@ -396,12 +411,14 @@ def cmd_watch(args):
     """Monitor a screen pixel for color changes."""
     from .watcher import ScreenWatcher
 
+    pyautogui = None
     if args.pick:
         try:
             import keyboard
         except ImportError:
             print("keyboard module required for --pick. Run: mousecoords doctor")
             sys.exit(1)
+        pyautogui = _load_pyautogui()
         print("mousecoords -- Screen Watcher")
         print("Position mouse at the pixel to watch, press SPACE")
         keyboard.wait("space")

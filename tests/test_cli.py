@@ -1,5 +1,9 @@
 """Tests for CLI argument parsing and command dispatch."""
 
+import os
+import subprocess
+import sys
+
 import pytest
 from unittest.mock import patch, MagicMock
 from io import StringIO
@@ -22,6 +26,21 @@ class TestCLIHelp:
                 main()
             assert exc_info.value.code == 0
 
+    def test_help_subprocess_headless(self):
+        """The top-level CLI should show help without requiring a display."""
+        env = os.environ.copy()
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        result = subprocess.run(
+            [sys.executable, "-m", "mousecoords", "--help"],
+            cwd=os.getcwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "usage:" in result.stdout.lower()
+
 
 class TestDoctorCommand:
     def test_doctor_runs(self, capsys):
@@ -38,6 +57,22 @@ class TestDoctorCommand:
         captured = capsys.readouterr()
         # Should have at least some PASS results
         assert "PASS" in captured.out
+
+    def test_doctor_subprocess_headless(self):
+        """Doctor should report display issues instead of crashing headless."""
+        env = os.environ.copy()
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        result = subprocess.run(
+            [sys.executable, "-m", "mousecoords", "doctor"],
+            cwd=os.getcwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "System Diagnostics" in result.stdout
+        assert "display" in result.stdout.lower()
 
 
 class TestProfileCommand:
