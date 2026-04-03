@@ -201,3 +201,37 @@ def print_diagnostics(results: list[CheckResult]):
     optional_fails = [r for r in results if not r.passed and not r.required]
     if optional_fails:
         print(f"\n  Install optional extras with: pip install mousecoords[all]")
+
+
+def diagnostics_to_dict(results: list[CheckResult]) -> dict:
+    """Serialize diagnostic results into a machine-readable payload."""
+    required_failures = [result for result in results if not result.passed and result.required]
+    optional_failures = [result for result in results if not result.passed and not result.required]
+    return {
+        "passed": sum(1 for result in results if result.passed),
+        "total": len(results),
+        "ok": not required_failures,
+        "checks": [
+            {
+                "name": result.name,
+                "passed": result.passed,
+                "detail": result.detail,
+                "required": result.required,
+            }
+            for result in results
+        ],
+        "required_failures": [
+            {
+                "name": result.name,
+                "detail": result.detail,
+            }
+            for result in required_failures
+        ],
+        "optional_failures": [
+            {
+                "name": result.name,
+                "detail": result.detail,
+            }
+            for result in optional_failures
+        ],
+    }

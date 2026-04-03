@@ -78,6 +78,23 @@ class TestDoctorCommand:
         assert "unexpected error" not in result.stdout
         assert "requires an active DISPLAY/GUI session" in result.stdout
 
+    def test_doctor_json_subprocess_headless(self):
+        env = os.environ.copy()
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        result = subprocess.run(
+            [sys.executable, "-m", "mousecoords", "doctor", "--json"],
+            cwd=os.getcwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["total"] >= 1
+        assert payload["ok"] is False
+        assert any(check["name"] == "display" for check in payload["checks"])
+
 
 class TestProfileCommand:
     def test_profile_list(self, capsys):

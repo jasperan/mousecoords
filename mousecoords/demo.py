@@ -1,4 +1,4 @@
-"""Built-in demo target and scaffold helpers for end-to-end walkthroughs."""
+"""Deterministic demo target used for onboarding and end-to-end validation."""
 
 from __future__ import annotations
 
@@ -9,119 +9,70 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from .config import ButtonConfig, Profile, StateConfig, save_profile
+from .config import load_profile, save_profile
 from .studio import create_studio_project
 
+DEMO_PROFILE_NAME = "desktop_demo"
 DEMO_WINDOW_TITLE = "mousecoords Demo Lab"
 DEMO_WINDOW_WIDTH = 420
 DEMO_WINDOW_HEIGHT = 260
 DEMO_WINDOW_X = 120
 DEMO_WINDOW_Y = 120
-
-
-@dataclass(frozen=True)
-class DemoButtonSpec:
-    """Deterministic rectangle target inside the demo window."""
-
-    name: str
-    x1: int
-    y1: int
-    x2: int
-    y2: int
-    color: tuple[int, int, int]
-
-    @property
-    def click_point(self) -> tuple[int, int]:
-        return (self.x1 + 22, self.y1 + 22)
-
-
-DEMO_BUTTONS: tuple[DemoButtonSpec, ...] = (
-    DemoButtonSpec("Harvest", 40, 90, 140, 150, (220, 70, 70)),
-    DemoButtonSpec("Boost", 160, 90, 260, 150, (70, 170, 70)),
-    DemoButtonSpec("Reset", 280, 90, 380, 150, (70, 120, 220)),
+DEMO_BUTTONS = (
+    {"name": "Harvest", "x1": 40, "y1": 90, "x2": 140, "y2": 150, "color": (220, 70, 70)},
+    {"name": "Boost", "x1": 160, "y1": 90, "x2": 260, "y2": 150, "color": (70, 170, 70)},
+    {"name": "Reset", "x1": 280, "y1": 90, "x2": 380, "y2": 150, "color": (70, 120, 220)},
 )
 
 
-@dataclass
-class DemoState:
-    """Serializable state for the walkthrough demo."""
-
-    title: str = DEMO_WINDOW_TITLE
-    started_at: float = field(default_factory=time.time)
-    last_button: str | None = None
-    total_clicks: int = 0
-    counters: dict[str, int] = field(
-        default_factory=lambda: {button.name: 0 for button in DEMO_BUTTONS}
-    )
-
-    def record_click(self, name: str):
-        self.total_clicks += 1
-        self.last_button = name
-        self.counters[name] = self.counters.get(name, 0) + 1
-
-    def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "started_at": self.started_at,
-            "last_button": self.last_button,
-            "total_clicks": self.total_clicks,
-            "counters": dict(self.counters),
-        }
-
-    def write(self, path: str | Path | None):
-        if path is None:
-            return
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True))
+def get_demo_profile_dir() -> Path:
+    """Return the bundled demo profile-pack directory."""
+    return Path(__file__).resolve().parent.parent / "profiles" / DEMO_PROFILE_NAME
 
 
-def build_demo_profile(*, name: str = "demo_lab") -> Profile:
-    """Return a ready-to-run profile for the built-in demo target."""
+def get_demo_profile_path() -> Path:
+    """Return the canonical profile file for the bundled demo scenario."""
+    return get_demo_profile_dir() / "profile.yaml"
 
-    buttons = [
-        ButtonConfig(
-            name=button.name,
-            x=DEMO_WINDOW_X + button.click_point[0],
-            y=DEMO_WINDOW_Y + button.click_point[1],
-            color=button.color,
-            cooldown=0.2,
-        )
-        for button in DEMO_BUTTONS
-    ]
-    states = [
-        StateConfig(
-            name="default",
-            monitor_buttons=[button.name for button in DEMO_BUTTONS],
-            transitions={},
-            max_actions={},
-        )
-    ]
-    return Profile(
-        name=name,
-        game=DEMO_WINDOW_TITLE,
-        resolution=(1280, 1024),
-        poll_interval=0.05,
-        color_tolerance=8,
-        buttons=buttons,
-        states=states,
-        ocr_regions={},
-    )
+
+def read_demo_state(path: str | Path | None) -> dict[str, Any]:
+    """Read a previously-written demo state file."""
+    if path is None:
+        return {}
+    state_path = Path(path)
+    if not state_path.exists():
+        return {}
+    return json.loads(state_path.read_text())
+
+
+def write_demo_state(path: str | Path | None, payload: dict[str, Any]):
+    """Persist demo state as JSON when a path is configured."""
+    if path is None:
+        return
+    state_path = Path(path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def create_demo_project(
     output_dir: str | Path,
     *,
-    name: str = "demo_lab",
+    name: str = DEMO_PROFILE_NAME,
     force: bool = False,
 ) -> Path:
     """Create a scaffolded profile pack wired to the built-in demo target."""
-
-    project = create_studio_project(output_dir, name=name, force=force)
-    save_profile(build_demo_profile(name=name), str(project.profile_path))
+    project = create_studio_project(
+        output_dir,
+        name=name,
+        from_profile=DEMO_PROFILE_NAME,
+        force=force,
+    )
+    profile = load_profile(str(project.profile_path))
+    profile.name = name
+    save_profile(profile, str(project.profile_path))
     return project.profile_path
 
 
@@ -131,19 +82,25 @@ def launch_demo_app(
     ready_file: str | Path | None = None,
     duration: float | None = None,
 ):
-    """Launch a deterministic Tkinter target for automation walkthroughs."""
-
+    """Launch the deterministic demo target and block until it closes."""
     import tkinter as tk
-
-    state = DemoState()
-    state.write(state_file)
 
     root = tk.Tk()
     root.title(DEMO_WINDOW_TITLE)
     root.geometry(f"{DEMO_WINDOW_WIDTH}x{DEMO_WINDOW_HEIGHT}+{DEMO_WINDOW_X}+{DEMO_WINDOW_Y}")
     root.resizable(False, False)
-    root.overrideredirect(True)
+    root.configure(bg="#f5f5f5")
     root.attributes("-topmost", True)
+    root.overrideredirect(True)
+
+    state: dict[str, Any] = {
+        "title": DEMO_WINDOW_TITLE,
+        "started_at": time.time(),
+        "total_clicks": 0,
+        "last_button": None,
+        "counters": {button["name"]: 0 for button in DEMO_BUTTONS},
+        "closed": False,
+    }
 
     canvas = tk.Canvas(
         root,
@@ -157,7 +114,7 @@ def launch_demo_app(
     canvas.create_text(
         DEMO_WINDOW_WIDTH / 2,
         28,
-        text="mousecoords Demo Lab",
+        text=DEMO_WINDOW_TITLE,
         fill="#202020",
         font=("TkDefaultFont", 16, "bold"),
     )
@@ -176,57 +133,84 @@ def launch_demo_app(
         font=("TkDefaultFont", 10),
     )
 
-    def _refresh(name: str):
-        state.record_click(name)
+    def flush_state(*, ready: bool = False, closed: bool = False):
+        root.update_idletasks()
+        state["ready"] = ready or state.get("ready", False)
+        state["closed"] = closed
+        state["updated_at"] = time.time()
+        write_demo_state(state_file, state)
+        if ready_file is not None and state["ready"]:
+            ready_path = Path(ready_file)
+            ready_path.parent.mkdir(parents=True, exist_ok=True)
+            ready_path.write_text("ready\n")
+
+    def on_click(name: str):
+        state["total_clicks"] += 1
+        state["last_button"] = name
+        state["counters"][name] += 1
         canvas.itemconfigure(subtitle_item, text=f"Last click: {name}")
         canvas.itemconfigure(
             footer_item,
             text=(
                 "Total clicks: "
-                f"{state.total_clicks} | "
-                + ", ".join(f"{key}={value}" for key, value in state.counters.items())
+                f"{state['total_clicks']} | "
+                + ", ".join(f"{key}={value}" for key, value in state["counters"].items())
             ),
         )
-        state.write(state_file)
+        flush_state()
 
     for button in DEMO_BUTTONS:
-        tag = f"button:{button.name}"
-        fill = "#%02x%02x%02x" % button.color
+        tag = f"button:{button['name']}"
+        fill = "#%02x%02x%02x" % button["color"]
         canvas.create_rectangle(
-            button.x1,
-            button.y1,
-            button.x2,
-            button.y2,
+            button["x1"],
+            button["y1"],
+            button["x2"],
+            button["y2"],
             fill=fill,
             outline="#202020",
             width=2,
             tags=(tag,),
         )
         canvas.create_text(
-            (button.x1 + button.x2) / 2,
-            button.y2 + 16,
-            text=button.name,
+            (button["x1"] + button["x2"]) / 2,
+            button["y2"] + 16,
+            text=button["name"],
             fill="#202020",
             font=("TkDefaultFont", 11, "bold"),
         )
-        canvas.tag_bind(tag, "<Button-1>", lambda _event, name=button.name: _refresh(name))
+        canvas.tag_bind(tag, "<Button-1>", lambda _event, name=button["name"]: on_click(name))
 
-    root.update_idletasks()
-    if ready_file is not None:
-        ready_path = Path(ready_file)
-        ready_path.parent.mkdir(parents=True, exist_ok=True)
-        ready_path.write_text("ready\n")
+    def close_app():
+        if state.get("closed"):
+            return
+        flush_state(closed=True)
+        root.destroy()
 
-    if duration and duration > 0:
-        root.after(int(duration * 1000), root.destroy)
+    def on_signal(_signum, _frame):
+        root.after(0, close_app)
 
-    def _handle_sigterm(_signum, _frame):
-        root.after(0, root.destroy)
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
 
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-    root.bind("<Escape>", lambda _event: root.destroy())
-    root.mainloop()
-    state.write(state_file)
+    root.after(200, lambda: flush_state(ready=True))
+    if duration is not None and duration > 0:
+        root.after(int(duration * 1000), close_app)
+
+    root.bind("<Escape>", lambda _event: close_app())
+    root.protocol("WM_DELETE_WINDOW", close_app)
+    try:
+        root.mainloop()
+    finally:
+        if not state.get("closed"):
+            state["closed"] = True
+            state["updated_at"] = time.time()
+            write_demo_state(state_file, state)
+
+
+def run_demo_app(**kwargs):
+    """Backward-compatible alias for older callers."""
+    launch_demo_app(**kwargs)
 
 
 def _wait_for_file(path: Path, timeout: float = 5.0) -> bool:
@@ -245,36 +229,34 @@ def run_demo_smoke(
     bundle_dir: str | None = None,
     debug: bool = False,
     startup_timeout: float = 5.0,
-) -> dict:
+) -> dict[str, Any]:
     """Launch the demo target and exercise the real CLI against it."""
 
     with tempfile.TemporaryDirectory(prefix="mousecoords-demo-") as tmpdir:
         workspace = Path(tmpdir)
         state_file = workspace / "state.json"
         ready_file = workspace / "ready.txt"
-        profile_target: str
-        if profile:
-            profile_target = profile
-        else:
-            profile_target = str(workspace / "demo-pack")
+        profile_target = profile or str(workspace / "demo-pack")
+
+        if profile is None:
             create_demo_project(profile_target, name="demo_lab")
 
-        launch_cmd = [
-            sys.executable,
-            "-m",
-            "mousecoords",
-            "demo",
-            "launch",
-            "--state-file",
-            str(state_file),
-            "--ready-file",
-            str(ready_file),
-            "--duration",
-            "8",
-        ]
         env = os.environ.copy()
+        env.setdefault("PYTHONPATH", str(Path.cwd()))
         app = subprocess.Popen(
-            launch_cmd,
+            [
+                sys.executable,
+                "-m",
+                "mousecoords",
+                "demo",
+                "launch",
+                "--state-file",
+                str(state_file),
+                "--ready-file",
+                str(ready_file),
+                "--duration",
+                "8",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -286,13 +268,12 @@ def run_demo_smoke(
                 stdout, stderr = app.communicate(timeout=2)
                 return {
                     "success": False,
-                    "profile": profile,
+                    "profile": profile_target,
                     "error": "Demo app did not become ready.",
                     "launch_stdout": stdout,
                     "launch_stderr": stderr,
                 }
 
-            time.sleep(0.25)
             run_cmd = [
                 sys.executable,
                 "-m",
@@ -328,7 +309,6 @@ def run_demo_smoke(
                     "run_returncode": run_result.returncode,
                 }
 
-            time.sleep(0.25)
             if app.poll() is None:
                 app.send_signal(signal.SIGTERM)
             try:
@@ -337,7 +317,7 @@ def run_demo_smoke(
                 app.kill()
                 launch_stdout, launch_stderr = app.communicate(timeout=3)
 
-            demo_state = json.loads(state_file.read_text()) if state_file.exists() else {}
+            demo_state = read_demo_state(state_file)
             success = (
                 run_result.returncode == 0
                 and automation.get("stats", {}).get("Total Clicks", 0) >= len(DEMO_BUTTONS)

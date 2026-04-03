@@ -15,6 +15,31 @@ What started as a 5-line coordinate grabber is now a full automation platform:
 - **Rich Dashboard** — live terminal UI with stats, event log, and button status
 - **YAML Profiles** — resolution-independent, shareable configuration
 
+## Quick proof it works
+
+If you're evaluating the repo on a headless Linux machine, you can now prove the
+real automation loop works without hunting for a separate target application:
+
+```bash
+# Machine-readable environment preflight
+python -m mousecoords doctor --json
+
+# Launch a deterministic demo target, run the real runtime against it, and print proof
+xvfb-run -a python -m mousecoords demo smoke --json
+
+# Same flow, but also capture a debug bundle you can inspect afterwards
+xvfb-run -a python -m mousecoords demo smoke --debug --bundle-dir bundles --json
+python -m mousecoords bundle inspect bundles/run-*.zip --json
+```
+
+If you want to drive the demo in separate steps, this works too:
+
+```bash
+xvfb-run -a python -m mousecoords demo launch --state-file /tmp/mousecoords-demo.json
+python -m mousecoords run -p profiles/desktop_demo --once --json
+cat /tmp/mousecoords-demo.json
+```
+
 ## Installation
 
 <!-- one-command-install -->
@@ -90,6 +115,11 @@ mousecoords bundle inspect bundles/run-20260403T031431Z.zip --json
 
 # Simple mode (no Rich dashboard)
 mousecoords automate --simple
+
+# Built-in deterministic demo target
+mousecoords demo smoke --json
+mousecoords demo pack --output profiles/demo_lab
+mousecoords demo launch --state-file /tmp/mousecoords-demo.json
 ```
 
 ### Record and replay macros
@@ -151,6 +181,7 @@ mousecoords studio new --output profiles/calculator
 
 # Copy an existing profile into a pack directory
 mousecoords studio new --output profiles/calculator --from-profile antimatter_dimensions
+mousecoords studio new --output profiles/demo_copy --from-profile desktop_demo
 ```
 
 This creates:

@@ -7,6 +7,8 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -93,3 +95,58 @@ def test_demo_smoke_succeeds_end_to_end():
     assert payload["automation"]["stats"]["Total Clicks"] >= 3
     assert payload["demo_state"]["total_clicks"] >= 3
 
+
+@pytest.mark.skipif(XVFB_RUN is None, reason="xvfb-run not available")
+def test_demo_smoke_can_emit_debug_bundle(tmp_path):
+    env = os.environ.copy()
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+    bundle_dir = tmp_path / "bundles"
+
+    smoke = subprocess.run(
+        [
+            XVFB_RUN,
+            "-a",
+            sys.executable,
+            "-m",
+            "mousecoords",
+            "demo",
+            "smoke",
+            "--debug",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--json",
+        ],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert smoke.returncode == 0, smoke.stderr
+    payload = json.loads(smoke.stdout)
+    bundle_path = payload["automation"]["bundle_path"]
+    assert Path(bundle_path).exists()
+
+    inspect = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mousecoords",
+            "bundle",
+            "inspect",
+            bundle_path,
+            "--json",
+        ],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert inspect.returncode == 0, inspect.stderr
+    bundle_payload = json.loads(inspect.stdout)
+    assert bundle_payload["manifest"]["profile"] in {"desktop_demo", "demo_lab"}
+    assert "summary.json" in bundle_payload["files"]

@@ -587,8 +587,11 @@ def cmd_ocr(args):
 
 def cmd_doctor(args):
     """Run system diagnostics."""
-    from .doctor import collect_diagnostics, print_diagnostics
+    from .doctor import collect_diagnostics, diagnostics_to_dict, print_diagnostics
     results = collect_diagnostics()
+    if args.json:
+        _print_json(diagnostics_to_dict(results))
+        return
     print_diagnostics(results)
 
 
@@ -690,7 +693,8 @@ def main():
     sub.add_parser("ocr", help="Read text from screen region via OCR")
 
     # doctor
-    sub.add_parser("doctor", help="Check system dependencies and environment")
+    p_doctor = sub.add_parser("doctor", help="Check system dependencies and environment")
+    p_doctor.add_argument("--json", action="store_true", help="Print structured JSON output")
 
     # bundle
     p_bundle = sub.add_parser("bundle", help="Inspect exported debug bundles")
