@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -29,10 +30,11 @@ from threading import Thread, Event as ThreadEvent
 
 from .config import (
     load_profile, save_profile, get_default_profile,
-    list_profiles, get_profiles_dir, is_default_profile_name, profile_to_data,
+    list_profiles, get_profiles_dir, is_default_profile_name,
+    profile_to_data, resolve_profile_target, validate_profile,
 )
-from .state_machine import StateMachine, GamePhase
-from .tui import Dashboard, HAS_RICH
+from .runtime import run_automation_session
+from .studio import create_studio_project
 
 # Global shutdown event for clean Ctrl+C handling
 _shutdown = ThreadEvent()
@@ -167,181 +169,159 @@ def cmd_coords(args):
     print("Done.")
 
 
-def cmd_automate(args):
-    """Run game automation with vision, state machine, and TUI."""
-    from .vision import VisionEngine
+def _resolve_profile(profile_arg: str | None):
+    """Resolve CLI profile input into a Profile instance."""
+    profile, path, source = resolve_profile_target(profile_arg)
+    return profile, str(path) if path is not None else source
 
-    pyautogui = _load_pyautogui("automate")
+
+def _print_json(payload: dict):
+    print(json.dumps(payload, indent=2, sort_keys=False))
+
+
+def _maybe_create_bundle(args, profile, result):
+    if not getattr(args, "debug", False) and not getattr(args, "bundle_dir", None):
+        return None
+
+    from .bundles import collect_runtime_bundle_inputs, create_debug_bundle
+
+    bundle_dir = Path(args.bundle_dir or "bundles")
+    inputs = collect_runtime_bundle_inputs(profile=profile, result=result)
+    return create_debug_bundle(bundle_dir=bundle_dir, inputs=inputs)
+
+
+def _run_command(args, *, command_name: str, mode_label: str):
+    """Shared execution path for `run` and legacy `automate`."""
+    try:
+        profile, _ = _resolve_profile(args.profile)
+    except FileNotFoundError as exc:
+        print(str(exc))
+        raise SystemExit(1)
+
+    pyautogui = _load_pyautogui(command_name)
     if args.no_failsafe:
         pyautogui.FAILSAFE = False
 
-    # Load profile
-    if args.profile:
-        profile_path = args.profile
-        if not Path(profile_path).exists():
-            profile_path = str(get_profiles_dir() / f"{args.profile}.yaml")
-        profile = load_profile(profile_path)
-    else:
-        profile = get_default_profile()
+    from .vision import VisionEngine
 
     vision = VisionEngine(color_tolerance=profile.color_tolerance)
-    sm = StateMachine(profile)
-
-    # --- Dashboard setup ---
-    dashboard = None
-    if HAS_RICH and not args.simple:
-        dashboard = Dashboard(
-            title=f"mousecoords -- {profile.game or profile.name}",
-        )
-        dashboard.set_mode("Game Automation")
-
-    def on_transition(old, new, trigger):
-        msg = f"{old} -> {new} (triggered by {trigger})"
-        if dashboard:
-            dashboard.log_state(msg)
-        else:
-            print(f"[STATE] {msg}")
-
-    def on_action(result):
-        if dashboard:
-            dashboard.log_action(f"Clicked {result.button_name}")
-        else:
-            print(f"[CLICK] {result.button_name}")
-
-    sm.on_transition(on_transition)
-    sm.on_action(on_action)
-
-    # --- Overlay (optional) ---
-    overlay = None
-    if args.overlay:
-        try:
-            from .overlay import Overlay
-            overlay = Overlay()
-            overlay.start()
-            for btn in profile.buttons:
-                overlay.add_marker(btn.name, btn.x, btn.y)
-        except Exception as e:
-            msg = f"Overlay unavailable: {e}"
-            if dashboard:
-                dashboard.log_warning(msg)
-            else:
-                print(f"[WARN] {msg}")
-
-    # --- OCR thread (optional) ---
-    ocr_data: dict = {}
-    if args.ocr and profile.ocr_regions:
-        def ocr_loop():
-            while not _shutdown.is_set():
-                for name, region in profile.ocr_regions.items():
-                    val = vision.read_number(region)
-                    if val is not None:
-                        ocr_data[name] = val
-                time.sleep(2)  # OCR is expensive, poll slowly
-
-        Thread(target=ocr_loop, daemon=True).start()
-
-    # --- Main automation loop ---
-    def automation_loop():
-        while not _shutdown.is_set():
-            try:
-                buttons = sm.monitored_buttons
-
-                for btn in buttons:
-                    if _shutdown.is_set():
-                        break
-
-                    if not sm.can_click(btn.name):
-                        if dashboard:
-                            status = "cooldown" if sm.is_on_cooldown(btn.name) else "disabled"
-                            dashboard.set_button_status(btn.name, status)
-                        continue
-
-                    # Detect button: template matching or color check
-                    detected = False
-                    click_x, click_y = btn.x, btn.y
-
-                    if btn.template:
-                        center = vision.find_button_by_template(btn.template)
-                        if center:
-                            detected = True
-                            click_x, click_y = center
-                    else:
-                        detected = vision.find_button_by_color(
-                            btn.x, btn.y, btn.color,
-                        )
-
-                    if detected:
-                        if dashboard:
-                            dashboard.set_button_status(btn.name, "active")
-                        pyautogui.click(click_x, click_y)
-                        sm.record_action(btn.name)
-
-                        # Priority buttons: skip remaining buttons this cycle
-                        if btn.priority:
-                            break
-                    else:
-                        if dashboard:
-                            dashboard.set_button_status(btn.name, "ready")
-
-                # Merge OCR data into stats display
-                stats = sm.stats.to_dict()
-                if ocr_data:
-                    for k, v in ocr_data.items():
-                        stats[f"OCR:{k}"] = f"{v:,.0f}"
-
-                if dashboard:
-                    dashboard.update_stats(stats)
-                    phase = sm.phase
-                    phase_str = phase.value if isinstance(phase, GamePhase) else str(phase)
-                    dashboard.set_state(phase_str.upper())
-
-                time.sleep(profile.poll_interval)
-
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                if dashboard:
-                    dashboard.log_error(str(e))
-                else:
-                    print(f"[ERROR] {e}")
-                time.sleep(1)
-
-    # --- Run ---
+    _shutdown.clear()
     _install_signal_handlers()
 
-    if dashboard:
-        live = dashboard.start()
-        dashboard.log_info(f"Profile: {profile.name}")
-        dashboard.log_info(f"Monitoring {len(profile.buttons)} buttons")
-        dashboard.log_info(f"Resolution: {profile.resolution[0]}x{profile.resolution[1]}")
-        if profile.ocr_regions:
-            dashboard.log_info(f"OCR regions: {len(profile.ocr_regions)}")
-        if pyautogui.FAILSAFE:
-            dashboard.log_info("Failsafe ON (move mouse to corner to stop)")
-        dashboard.log_info("Press Ctrl+C to stop")
-        phase = sm.phase
-        phase_str = phase.value if isinstance(phase, GamePhase) else str(phase)
-        dashboard.set_state(phase_str.upper())
+    result = run_automation_session(
+        profile=profile,
+        vision=vision,
+        pyautogui=pyautogui,
+        shutdown_event=_shutdown,
+        mode=mode_label,
+        overlay_enabled=args.overlay,
+        ocr_enabled=args.ocr,
+        simple=args.simple,
+        dry_run=getattr(args, "dry_run", False),
+        once=getattr(args, "once", False),
+        duration=getattr(args, "duration", None),
+        render_output=not getattr(args, "json", False),
+    )
+    bundle_path = _maybe_create_bundle(args, profile, result)
+    payload = result.to_dict()
+    if bundle_path is not None:
+        payload["bundle_path"] = str(bundle_path)
 
-        with live:
-            automation_loop()
-        dashboard.stop()
-    else:
-        print(f"Profile: {profile.name}")
-        print(f"Monitoring {len(profile.buttons)} buttons")
-        if pyautogui.FAILSAFE:
-            print("Failsafe ON (move mouse to top-left corner to emergency stop)")
-        print("Press Ctrl+C to stop")
-        print("-" * 45)
-        automation_loop()
+    if getattr(args, "json", False):
+        _print_json(payload)
+        return payload
 
-    if overlay:
-        overlay.stop()
-
-    # Final stats
     print("\nFinal Statistics:")
-    for k, v in sm.stats.to_dict().items():
-        print(f"  {k}: {v}")
+    for key, value in result.stats.items():
+        print(f"  {key}: {value}")
+    if bundle_path is not None:
+        print(f"\nDebug bundle: {bundle_path}")
+    return payload
+
+
+def cmd_automate(args):
+    """Run game automation with vision, state machine, and TUI."""
+    _run_command(args, command_name="automate", mode_label="Game Automation")
+
+
+def cmd_run(args):
+    """Run automation with safer execution controls."""
+    _run_command(args, command_name="run", mode_label="Automation Run")
+
+
+def cmd_bundle(args):
+    """Inspect exported debug bundles."""
+    from zipfile import BadZipFile
+    from .bundles import inspect_bundle
+
+    try:
+        info = inspect_bundle(args.bundle)
+    except FileNotFoundError:
+        print(f"Bundle not found: {args.bundle}")
+        raise SystemExit(1)
+    except (BadZipFile, KeyError, ValueError) as exc:
+        print(f"Could not inspect bundle '{args.bundle}': {exc}")
+        raise SystemExit(1)
+
+    if args.json:
+        _print_json(info)
+        return
+
+    print(f"Bundle: {args.bundle}")
+    print("Manifest:")
+    for key, value in info["manifest"].items():
+        print(f"{key}: {value}")
+    if info["files"]:
+        print("Files:")
+        for name in info["files"]:
+            print(f"  - {name}")
+
+
+def cmd_profile_validate(args):
+    """Validate a profile and report actionable issues."""
+    target = args.name or args.target or args.path or get_default_profile().name
+    try:
+        profile, resolved_path = _resolve_profile(target)
+    except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+        payload = {
+            "profile_name": target,
+            "source": str(target),
+            "ok": False,
+            "issues": [
+                {
+                    "level": "error",
+                    "code": "profile_load_failed",
+                    "message": str(exc),
+                }
+            ],
+        }
+        if args.json:
+            _print_json(payload)
+        else:
+            print(f"Profile '{target}' could not be loaded:")
+            print(f"  - [error] profile_load_failed: {exc}")
+        raise SystemExit(1)
+
+    validation = validate_profile(profile, profile_path=resolved_path)
+    payload = validation.to_dict()
+    if args.json:
+        _print_json(payload)
+        if not validation.ok:
+            raise SystemExit(1)
+        return
+
+    if validation.ok:
+        print(f"Profile '{profile.name}' is valid.")
+        return
+    print(f"Profile '{profile.name}' has {len(validation.issues)} issue(s):")
+    for issue in validation.issues:
+        print(f"  - [{issue.level}] {issue.code}: {issue.message}")
+    raise SystemExit(1)
+
+
+def cmd_automate_legacy(args):
+    """Compatibility wrapper retained for existing users."""
+    cmd_automate(args)
 
 
 def cmd_record(args):
@@ -450,10 +430,14 @@ def cmd_profile(args):
         print("Edit the YAML to customize buttons, colors, limits, and OCR regions.")
 
     elif args.action == "show":
-        name = args.name or get_default_profile().name
-        path = str(get_profiles_dir() / f"{name}.yaml")
-        if Path(path).exists():
-            print(Path(path).read_text())
+        name = args.name or args.target or get_default_profile().name
+        try:
+            _, resolved_path, _ = resolve_profile_target(name)
+        except FileNotFoundError:
+            resolved_path = None
+
+        if resolved_path is not None:
+            print(Path(resolved_path).read_text())
         elif is_default_profile_name(name):
             import yaml
 
@@ -462,6 +446,37 @@ def cmd_profile(args):
             print(yaml.dump(data, default_flow_style=False, sort_keys=False))
         else:
             print(f"Profile '{name}' not found. Run 'profile list' to see available profiles.")
+
+
+def cmd_studio_new(args):
+    """Create a minimal profile-pack scaffold."""
+    try:
+        project = create_studio_project(
+            args.output,
+            name=args.name,
+            from_profile=args.from_profile,
+            force=args.force,
+        )
+    except FileExistsError as exc:
+        print(str(exc))
+        raise SystemExit(1)
+    except FileNotFoundError as exc:
+        print(str(exc))
+        raise SystemExit(1)
+
+    print(f"Created studio scaffold: {project.output_dir}")
+    print(f"  Profile: {project.profile_path}")
+    print(f"  Source:  {project.source}")
+    print("  Assets:  assets/templates/, assets/reference/")
+
+
+def cmd_studio(args):
+    """Dispatch studio subcommands."""
+    if args.studio_action == "new":
+        cmd_studio_new(args)
+        return
+    print("Use `mousecoords studio new --output <dir>` to create a profile pack scaffold.")
+    raise SystemExit(1)
 
 
 def cmd_ocr(args):
@@ -545,8 +560,29 @@ def main():
     p_auto.add_argument("--overlay", action="store_true", help="Show visual overlay")
     p_auto.add_argument("--ocr", action="store_true", help="Enable OCR reading")
     p_auto.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
+    p_auto.add_argument("--dry-run", action="store_true", help="Detect actions without clicking")
+    p_auto.add_argument("--once", action="store_true", help="Run a single automation cycle")
+    p_auto.add_argument("--duration", type=float, default=None, help="Stop after N seconds")
+    p_auto.add_argument("--json", action="store_true", help="Print structured JSON summary")
+    p_auto.add_argument("--debug", action="store_true", help="Export a debug bundle after the run")
+    p_auto.add_argument("--bundle-dir", help="Directory for exported debug bundles")
     p_auto.add_argument("--no-failsafe", action="store_true",
                         help="Disable pyautogui corner failsafe")
+
+    # run
+    p_run = sub.add_parser("run", help="Run automation with safer execution controls")
+    p_run.add_argument("-p", "--profile", help="Profile name or YAML path")
+    p_run.add_argument("--overlay", action="store_true", help="Show visual overlay")
+    p_run.add_argument("--ocr", action="store_true", help="Enable OCR reading")
+    p_run.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
+    p_run.add_argument("--dry-run", action="store_true", help="Detect actions without clicking")
+    p_run.add_argument("--once", action="store_true", help="Run a single automation cycle")
+    p_run.add_argument("--duration", type=float, default=None, help="Stop after N seconds")
+    p_run.add_argument("--json", action="store_true", help="Print structured JSON summary")
+    p_run.add_argument("--debug", action="store_true", help="Export a debug bundle after the run")
+    p_run.add_argument("--bundle-dir", help="Directory for exported debug bundles")
+    p_run.add_argument("--no-failsafe", action="store_true",
+                       help="Disable pyautogui corner failsafe")
 
     # record
     p_rec = sub.add_parser("record", help="Record a macro")
@@ -566,14 +602,33 @@ def main():
 
     # profile
     p_prof = sub.add_parser("profile", help="Manage automation profiles")
-    p_prof.add_argument("action", choices=["list", "create", "show"])
+    p_prof.add_argument("action", choices=["list", "create", "show", "validate"])
+    p_prof.add_argument("target", nargs="?", help="Profile name or YAML path")
     p_prof.add_argument("-n", "--name", help="Profile name")
+    p_prof.add_argument("--path", help="Explicit profile path to validate")
+    p_prof.add_argument("--json", action="store_true", help="Print structured JSON validation output")
 
     # ocr
     sub.add_parser("ocr", help="Read text from screen region via OCR")
 
     # doctor
     sub.add_parser("doctor", help="Check system dependencies and environment")
+
+    # bundle
+    p_bundle = sub.add_parser("bundle", help="Inspect exported debug bundles")
+    p_bundle_sub = p_bundle.add_subparsers(dest="bundle_action")
+    p_bundle_inspect = p_bundle_sub.add_parser("inspect", help="Print manifest details from a bundle")
+    p_bundle_inspect.add_argument("bundle", help="Path to bundle zip")
+    p_bundle_inspect.add_argument("--json", action="store_true", help="Print JSON output")
+
+    # studio
+    p_studio = sub.add_parser("studio", help="Create and manage profile-pack scaffolds")
+    p_studio_sub = p_studio.add_subparsers(dest="studio_action")
+    p_studio_new = p_studio_sub.add_parser("new", help="Create a new profile-pack scaffold")
+    p_studio_new.add_argument("--output", required=True, help="Directory for the new profile pack")
+    p_studio_new.add_argument("--name", help="Profile name to write into profile.yaml")
+    p_studio_new.add_argument("--from-profile", help="Existing profile name or path to copy from")
+    p_studio_new.add_argument("--force", action="store_true", help="Overwrite an existing non-empty output directory")
 
     # watch
     p_watch = sub.add_parser("watch", help="Monitor a pixel for color changes")
@@ -592,7 +647,8 @@ def main():
 
     commands = {
         "coords": cmd_coords,
-        "automate": cmd_automate,
+        "automate": cmd_automate_legacy,
+        "run": cmd_run,
         "record": cmd_record,
         "play": cmd_play,
         "capture": cmd_capture,
@@ -600,10 +656,22 @@ def main():
         "ocr": cmd_ocr,
         "doctor": cmd_doctor,
         "watch": cmd_watch,
+        "bundle": cmd_bundle,
+        "studio": cmd_studio,
     }
 
+    if args.command == "bundle" and args.bundle_action != "inspect":
+        p_bundle.print_help()
+        return
+    if args.command == "studio" and args.studio_action != "new":
+        p_studio.print_help()
+        return
+
     if args.command in commands:
-        commands[args.command](args)
+        if args.command == "profile" and args.action == "validate":
+            cmd_profile_validate(args)
+        else:
+            commands[args.command](args)
     else:
         parser.print_help()
 

@@ -7,6 +7,7 @@ from mousecoords.config import (
     Profile, ButtonConfig, StateConfig,
     load_profile, save_profile, list_profiles,
     get_profiles_dir, get_default_profile, DEFAULT_PROFILE_NAME,
+    resolve_profile_target, validate_profile,
 )
 
 
@@ -91,6 +92,14 @@ class TestListProfiles:
         profiles = list_profiles()
         assert "antimatter_dimensions" in profiles
 
+    def test_list_profiles_includes_pack_directories(self, sample_profile, tmp_path, monkeypatch):
+        profiles_dir = tmp_path / "profiles"
+        pack_dir = profiles_dir / "pack_profile"
+        monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: profiles_dir)
+        save_profile(sample_profile, str(pack_dir / "profile.yaml"))
+        profiles = list_profiles()
+        assert "pack_profile" in profiles
+
     def test_list_profiles_includes_builtin_default_when_dir_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: tmp_path / "missing")
         profiles = list_profiles()
@@ -118,3 +127,127 @@ class TestDefaultProfile:
     def test_default_has_ocr_regions(self):
         p = get_default_profile()
         assert "antimatter_count" in p.ocr_regions
+
+
+class TestResolveProfileTarget:
+    def test_resolve_builtin_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: tmp_path / "missing")
+        profile, path, source = resolve_profile_target()
+        assert profile.name == DEFAULT_PROFILE_NAME
+        assert path is None
+        assert source == "builtin default profile"
+
+    def test_resolve_named_profile(self, sample_profile, tmp_path, monkeypatch):
+        profiles_dir = tmp_path / "profiles"
+        monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: profiles_dir)
+        save_profile(sample_profile, str(profiles_dir / "test_game.yaml"))
+        profile, path, source = resolve_profile_target("test_game")
+        assert profile.name == "test_game"
+        assert path == profiles_dir / "test_game.yaml"
+        assert source.endswith("test_game.yaml")
+
+    def test_resolve_named_pack_profile(self, sample_profile, tmp_path, monkeypatch):
+        profiles_dir = tmp_path / "profiles"
+        monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: profiles_dir)
+        pack_path = profiles_dir / "pack_game" / "profile.yaml"
+        save_profile(sample_profile, str(pack_path))
+        profile, path, source = resolve_profile_target("pack_game")
+        assert profile.name == sample_profile.name
+        assert path == pack_path
+        assert source.endswith("pack_game/profile.yaml")
+
+    def test_resolve_explicit_pack_directory(self, sample_profile, tmp_path):
+        pack_dir = tmp_path / "explicit_pack"
+        save_profile(sample_profile, str(pack_dir / "profile.yaml"))
+        profile, path, source = resolve_profile_target(str(pack_dir))
+        assert profile.name == sample_profile.name
+        assert path == pack_dir / "profile.yaml"
+        assert source.endswith("explicit_pack/profile.yaml")
+
+
+class TestValidateProfile:
+    def test_validate_valid_profile(self, sample_profile):
+        result = validate_profile(sample_profile)
+        assert result.ok is True
+        assert result.issues == []
+
+    def test_duplicate_button_names(self, sample_profile):
+        sample_profile.buttons.append(ButtonConfig("Attack", 1, 1, (0, 0, 0)))
+        result = validate_profile(sample_profile)
+        assert result.ok is False
+        assert any(issue.code == "duplicate_button" for issue in result.issues)
+
+    def test_duplicate_state_names(self, sample_profile):
+        sample_profile.states.append(StateConfig(name="combat"))
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "duplicate_state" for issue in result.issues)
+
+    def test_unknown_monitored_button(self, sample_profile):
+        sample_profile.states[0].monitor_buttons.append("Missing Button")
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "unknown_monitor_button" for issue in result.issues)
+
+    def test_unknown_transition_target(self, sample_profile):
+        sample_profile.states[0].transitions["Attack"] = "missing_state"
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "unknown_transition_state" for issue in result.issues)
+
+    def test_unknown_transition_trigger(self, sample_profile):
+        sample_profile.states[0].transitions["Missing Button"] = "defend"
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "unknown_transition_trigger" for issue in result.issues)
+
+    def test_missing_template_file(self, sample_profile, tmp_path):
+        sample_profile.buttons[0].template = "templates/missing.png"
+        result = validate_profile(sample_profile, tmp_path / "profile.yaml")
+        assert any(issue.code == "missing_template" for issue in result.issues)
+
+    def test_invalid_ocr_region_shape(self, sample_profile):
+        sample_profile.ocr_regions["health"] = (1, 2, 3)
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_ocr_region" for issue in result.issues)
+
+    def test_invalid_ocr_region_dimensions(self, sample_profile):
+        sample_profile.ocr_regions["health"] = (1, 2, 0, -1)
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_ocr_region" for issue in result.issues)
+
+    def test_invalid_resolution(self, sample_profile):
+        sample_profile.resolution = (1920, 0)
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_resolution" for issue in result.issues)
+
+    def test_invalid_poll_interval(self, sample_profile):
+        sample_profile.poll_interval = 0
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_poll_interval" for issue in result.issues)
+
+    def test_invalid_color_tolerance(self, sample_profile):
+        sample_profile.color_tolerance = -1
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_color_tolerance" for issue in result.issues)
+
+    def test_invalid_button_coordinates(self, sample_profile):
+        sample_profile.buttons[0].x = "10"
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_button_coordinates" for issue in result.issues)
+
+    def test_invalid_button_color(self, sample_profile):
+        sample_profile.buttons[0].color = (255, 255, 999)
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_button_color" for issue in result.issues)
+
+    def test_invalid_button_cooldown(self, sample_profile):
+        sample_profile.buttons[0].cooldown = -0.5
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_button_cooldown" for issue in result.issues)
+
+    def test_unknown_max_action_button(self, sample_profile):
+        sample_profile.states[0].max_actions["Missing Button"] = 1
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "unknown_max_action_button" for issue in result.issues)
+
+    def test_invalid_max_action_limit(self, sample_profile):
+        sample_profile.states[0].max_actions["Attack"] = -1
+        result = validate_profile(sample_profile)
+        assert any(issue.code == "invalid_max_action_limit" for issue in result.issues)

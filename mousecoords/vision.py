@@ -6,7 +6,6 @@ import re
 from typing import Optional
 from pathlib import Path
 
-import pyautogui
 from .screen import capture_screen
 
 try:
@@ -102,6 +101,8 @@ class VisionEngine:
         if not HAS_CV2:
             # Fallback: pyautogui.locate (slower, needs opencv-python for confidence)
             from PIL import Image
+            import pyautogui
+
             if not isinstance(template, Image.Image):
                 template = Image.fromarray(template)
             loc = pyautogui.locate(template, capture_screen(region=region))

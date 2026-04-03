@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import os
 import yaml
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
 from pathlib import Path
 
 DEFAULT_PROFILE_NAME = "antimatter_dimensions"
+
+
+def _pack_profile_path(directory: Path) -> Path:
+    """Return the canonical profile file inside a profile-pack directory."""
+    return directory / "profile.yaml"
 
 
 @dataclass
@@ -95,6 +101,44 @@ class Profile:
         )
 
 
+@dataclass
+class ValidationIssue:
+    """Single actionable validation finding for a profile."""
+    level: str
+    code: str
+    message: str
+
+
+@dataclass
+class ProfileValidationResult:
+    """Aggregate validation result for a profile."""
+    profile_name: str
+    source: str
+    issues: list[ValidationIssue] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not any(issue.level == "error" for issue in self.issues)
+
+    def add(self, code: str, message: str, level: str = "error"):
+        self.issues.append(ValidationIssue(level=level, code=code, message=message))
+
+    def to_dict(self) -> dict:
+        return {
+            "profile_name": self.profile_name,
+            "source": self.source,
+            "ok": self.ok,
+            "issues": [
+                {
+                    "level": issue.level,
+                    "code": issue.code,
+                    "message": issue.message,
+                }
+                for issue in self.issues
+            ],
+        }
+
+
 def load_profile(path: str) -> Profile:
     """Load a profile from a YAML file."""
     with open(path) as f:
@@ -118,6 +162,41 @@ def load_profile(path: str) -> Profile:
         states=states,
         ocr_regions=ocr_regions,
     )
+
+
+def resolve_profile_target(target: Optional[str] = None) -> tuple[Profile, Optional[Path], str]:
+    """Resolve a profile by path or name, with a built-in default fallback."""
+    if target:
+        explicit_path = Path(target)
+        if explicit_path.exists():
+            if explicit_path.is_dir():
+                pack_path = _pack_profile_path(explicit_path)
+                if not pack_path.exists():
+                    raise FileNotFoundError(
+                        f"Profile directory '{explicit_path}' does not contain {pack_path.name}."
+                    )
+                return load_profile(str(pack_path)), pack_path, str(pack_path)
+            return load_profile(str(explicit_path)), explicit_path, str(explicit_path)
+
+        named_path = get_profiles_dir() / f"{target}.yaml"
+        if named_path.exists():
+            return load_profile(str(named_path)), named_path, str(named_path)
+
+        pack_path = _pack_profile_path(get_profiles_dir() / target)
+        if pack_path.exists():
+            return load_profile(str(pack_path)), pack_path, str(pack_path)
+
+        if is_default_profile_name(target):
+            return get_default_profile(), None, "builtin default profile"
+
+        raise FileNotFoundError(
+            f"Profile '{target}' not found. Expected a YAML path or {named_path}."
+        )
+
+    default_path = get_profiles_dir() / f"{DEFAULT_PROFILE_NAME}.yaml"
+    if default_path.exists():
+        return load_profile(str(default_path)), default_path, str(default_path)
+    return get_default_profile(), None, "builtin default profile"
 
 
 def save_profile(profile: Profile, path: str):
@@ -164,6 +243,42 @@ def get_profiles_dir() -> Path:
     return Path(__file__).parent.parent / "profiles"
 
 
+def resolve_profile_reference(reference: Optional[str] = None) -> tuple[Profile, str]:
+    """Resolve a profile name/path into a loaded profile and source label."""
+    if reference:
+        explicit_path = Path(reference)
+        if explicit_path.exists():
+            if explicit_path.is_dir():
+                pack_path = _pack_profile_path(explicit_path)
+                if not pack_path.exists():
+                    raise FileNotFoundError(
+                        f"Profile directory '{explicit_path}' does not contain {pack_path.name}."
+                    )
+                return load_profile(str(pack_path)), str(pack_path)
+            return load_profile(str(explicit_path)), str(explicit_path)
+
+        named_path = get_profiles_dir() / f"{reference}.yaml"
+        if named_path.exists():
+            return load_profile(str(named_path)), str(named_path)
+
+        pack_path = _pack_profile_path(get_profiles_dir() / reference)
+        if pack_path.exists():
+            return load_profile(str(pack_path)), str(pack_path)
+
+        if is_default_profile_name(reference):
+            return get_default_profile(), f"builtin:{reference}"
+
+        raise FileNotFoundError(
+            f"Profile '{reference}' not found. Run 'mousecoords profile list' to see available profiles."
+        )
+
+    default_name = get_default_profile().name
+    default_path = get_profiles_dir() / f"{default_name}.yaml"
+    if default_path.exists():
+        return load_profile(str(default_path)), str(default_path)
+    return get_default_profile(), f"builtin:{default_name}"
+
+
 def is_default_profile_name(name: str) -> bool:
     """Return True when a requested profile name is the built-in default."""
     return name == DEFAULT_PROFILE_NAME
@@ -175,9 +290,155 @@ def list_profiles() -> list:
     names = []
     if profiles_dir.exists():
         names.extend(f.stem for f in profiles_dir.glob("*.yaml"))
+        names.extend(
+            path.parent.name
+            for path in profiles_dir.glob("*/profile.yaml")
+        )
     if DEFAULT_PROFILE_NAME not in names:
         names.append(DEFAULT_PROFILE_NAME)
     return sorted(set(names))
+
+
+def resolve_template_path(template: str, profile_path: Optional[Path] = None) -> Optional[Path]:
+    """Resolve a template reference using common profile/project-relative locations."""
+    template_path = Path(template)
+    candidates = []
+
+    if template_path.is_absolute():
+        candidates.append(template_path)
+    else:
+        if profile_path is not None:
+            candidates.append(profile_path.parent / template_path)
+        project_root = get_profiles_dir().parent
+        candidates.append(project_root / template_path)
+        candidates.append(Path.cwd() / template_path)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def validate_profile(profile: Profile, profile_path: Optional[str | Path] = None) -> ProfileValidationResult:
+    """Validate profile structure and referenced assets."""
+    source = str(profile_path) if profile_path else "builtin default profile"
+    resolved_profile_path = Path(profile_path) if profile_path else None
+    result = ProfileValidationResult(profile_name=profile.name, source=source)
+
+    if (
+        not isinstance(profile.resolution, tuple)
+        or len(profile.resolution) != 2
+        or not all(isinstance(value, int) for value in profile.resolution)
+        or any(value <= 0 for value in profile.resolution)
+    ):
+        result.add(
+            "invalid_resolution",
+            "Resolution must be a 2-item positive integer tuple/list [width, height].",
+        )
+
+    if not isinstance(profile.poll_interval, (int, float)) or profile.poll_interval <= 0:
+        result.add("invalid_poll_interval", "poll_interval must be a positive number.")
+
+    if not isinstance(profile.color_tolerance, int) or profile.color_tolerance < 0:
+        result.add("invalid_color_tolerance", "color_tolerance must be a non-negative integer.")
+
+    button_names = [button.name for button in profile.buttons]
+    state_names = [state.name for state in profile.states]
+
+    for name, count in Counter(button_names).items():
+        if count > 1:
+            result.add("duplicate_button", f"Button '{name}' is defined {count} times.")
+
+    for name, count in Counter(state_names).items():
+        if count > 1:
+            result.add("duplicate_state", f"State '{name}' is defined {count} times.")
+
+    button_name_set = set(button_names)
+    state_name_set = set(state_names)
+
+    for button in profile.buttons:
+        if not isinstance(button.x, int) or not isinstance(button.y, int):
+            result.add(
+                "invalid_button_coordinates",
+                f"Button '{button.name}' must use integer x/y coordinates.",
+            )
+
+        if (
+            not isinstance(button.color, tuple)
+            or len(button.color) != 3
+            or not all(isinstance(value, int) for value in button.color)
+            or any(value < 0 or value > 255 for value in button.color)
+        ):
+            result.add(
+                "invalid_button_color",
+                f"Button '{button.name}' must use an RGB tuple/list of three integers between 0 and 255.",
+            )
+
+        if not isinstance(button.cooldown, (int, float)) or button.cooldown < 0:
+            result.add(
+                "invalid_button_cooldown",
+                f"Button '{button.name}' must use a non-negative cooldown.",
+            )
+
+        if button.template and resolve_template_path(button.template, resolved_profile_path) is None:
+            result.add(
+                "missing_template",
+                f"Button '{button.name}' references missing template '{button.template}'.",
+            )
+
+    for state in profile.states:
+        for button_name in state.monitor_buttons:
+            if button_name not in button_name_set:
+                result.add(
+                    "unknown_monitor_button",
+                    f"State '{state.name}' references unknown button '{button_name}'.",
+                )
+
+        for trigger, destination in state.transitions.items():
+            if trigger not in button_name_set:
+                result.add(
+                    "unknown_transition_trigger",
+                    f"State '{state.name}' transitions on unknown button '{trigger}'.",
+                )
+            if destination not in state_name_set:
+                result.add(
+                    "unknown_transition_state",
+                    f"State '{state.name}' transitions to missing state '{destination}'.",
+                )
+
+        for button_name, limit in state.max_actions.items():
+            if button_name not in button_name_set:
+                result.add(
+                    "unknown_max_action_button",
+                    f"State '{state.name}' sets max_actions for unknown button '{button_name}'.",
+                )
+            if not isinstance(limit, int) or limit < 0:
+                result.add(
+                    "invalid_max_action_limit",
+                    f"State '{state.name}' must use non-negative integer limits for '{button_name}'.",
+                )
+
+    for region_name, region in profile.ocr_regions.items():
+        if not isinstance(region, tuple) or len(region) != 4:
+            result.add(
+                "invalid_ocr_region",
+                f"OCR region '{region_name}' must be a 4-item tuple/list [x, y, width, height].",
+            )
+            continue
+        if not all(isinstance(value, int) for value in region):
+            result.add(
+                "invalid_ocr_region",
+                f"OCR region '{region_name}' must contain integer coordinates.",
+            )
+            continue
+        _, _, width, height = region
+        if width <= 0 or height <= 0:
+            result.add(
+                "invalid_ocr_region",
+                f"OCR region '{region_name}' must have positive width and height.",
+            )
+
+    return result
 
 
 def get_default_profile() -> Profile:
