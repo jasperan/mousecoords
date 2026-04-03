@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import yaml
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional
 from pathlib import Path
+
+DEFAULT_PROFILE_NAME = "antimatter_dimensions"
 
 
 @dataclass
@@ -120,7 +122,15 @@ def load_profile(path: str) -> Profile:
 
 def save_profile(profile: Profile, path: str):
     """Save a profile to a YAML file."""
-    data = {
+    data = profile_to_data(profile)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def profile_to_data(profile: Profile) -> dict:
+    """Serialize a profile into the YAML-friendly shape used on disk."""
+    return {
         "name": profile.name,
         "game": profile.game,
         "resolution": list(profile.resolution),
@@ -147,9 +157,6 @@ def save_profile(profile: Profile, path: str):
         ],
         "ocr_regions": {k: list(v) for k, v in profile.ocr_regions.items()},
     }
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 def get_profiles_dir() -> Path:
@@ -157,18 +164,26 @@ def get_profiles_dir() -> Path:
     return Path(__file__).parent.parent / "profiles"
 
 
+def is_default_profile_name(name: str) -> bool:
+    """Return True when a requested profile name is the built-in default."""
+    return name == DEFAULT_PROFILE_NAME
+
+
 def list_profiles() -> list:
     """List available profile names."""
     profiles_dir = get_profiles_dir()
-    if not profiles_dir.exists():
-        return []
-    return [f.stem for f in profiles_dir.glob("*.yaml")]
+    names = []
+    if profiles_dir.exists():
+        names.extend(f.stem for f in profiles_dir.glob("*.yaml"))
+    if DEFAULT_PROFILE_NAME not in names:
+        names.append(DEFAULT_PROFILE_NAME)
+    return sorted(set(names))
 
 
 def get_default_profile() -> Profile:
     """Get the built-in Antimatter Dimensions default profile."""
     return Profile(
-        name="antimatter_dimensions",
+        name=DEFAULT_PROFILE_NAME,
         game="Antimatter Dimensions",
         resolution=(3840, 2160),
         poll_interval=0.5,

@@ -27,7 +27,7 @@ from threading import Thread, Event as ThreadEvent
 
 from .config import (
     load_profile, save_profile, get_default_profile,
-    list_profiles, get_profiles_dir,
+    list_profiles, get_profiles_dir, is_default_profile_name, profile_to_data,
 )
 from .state_machine import StateMachine, GamePhase
 from .tui import Dashboard, HAS_RICH
@@ -36,9 +36,23 @@ from .tui import Dashboard, HAS_RICH
 _shutdown = ThreadEvent()
 
 
-def _load_pyautogui():
+def _format_gui_error(exc: Exception) -> str:
+    """Normalize common display/runtime errors into readable output."""
+    if isinstance(exc, KeyError) and exc.args == ("DISPLAY",):
+        return "requires an active DISPLAY/GUI session"
+    return str(exc) or exc.__class__.__name__
+
+
+def _load_pyautogui(command_name: str):
     """Import pyautogui only when a command actually needs GUI access."""
-    pyautogui = import_module("pyautogui")
+    try:
+        pyautogui = import_module("pyautogui")
+    except Exception as exc:
+        detail = _format_gui_error(exc)
+        print(f"`mousecoords {command_name}` requires an active graphical session.")
+        print(f"Reason: {detail}")
+        print("Run `mousecoords doctor` for diagnostics. On headless Linux, try `xvfb-run -a ...`.")
+        raise SystemExit(1)
     # Re-enable pyautogui failsafe (move mouse to corner to emergency-stop).
     # Users can disable with --no-failsafe if they know what they're doing.
     pyautogui.FAILSAFE = True
@@ -60,10 +74,11 @@ def _install_signal_handlers():
 
 def cmd_coords(args):
     """Enhanced coordinate grabber with color readout."""
+    pyautogui = _load_pyautogui("coords")
+
     import keyboard
     from .vision import VisionEngine
 
-    pyautogui = _load_pyautogui()
     vision = VisionEngine()
     print("mousecoords -- Coordinate Grabber")
     print("Press SPACE to capture coordinates, Q to quit")
@@ -87,7 +102,7 @@ def cmd_automate(args):
     """Run game automation with vision, state machine, and TUI."""
     from .vision import VisionEngine
 
-    pyautogui = _load_pyautogui()
+    pyautogui = _load_pyautogui("automate")
     if args.no_failsafe:
         pyautogui.FAILSAFE = False
 
@@ -262,6 +277,8 @@ def cmd_automate(args):
 
 def cmd_record(args):
     """Record a macro."""
+    _load_pyautogui("record")
+
     from .recorder import MacroRecorder
 
     recorder = MacroRecorder(record_moves=args.moves)
@@ -291,6 +308,8 @@ def cmd_record(args):
 
 def cmd_play(args):
     """Play back a recorded macro."""
+    _load_pyautogui("play")
+
     from .recorder import MacroRecorder
 
     recorder = MacroRecorder()
@@ -315,10 +334,11 @@ def cmd_play(args):
 
 def cmd_capture(args):
     """Capture a button template for CV-based detection."""
+    pyautogui = _load_pyautogui("capture")
+
     import keyboard
     from .vision import VisionEngine
 
-    pyautogui = _load_pyautogui()
     vision = VisionEngine()
 
     print("mousecoords -- Template Capture")
@@ -363,20 +383,27 @@ def cmd_profile(args):
         print("Edit the YAML to customize buttons, colors, limits, and OCR regions.")
 
     elif args.action == "show":
-        name = args.name or "antimatter_dimensions"
+        name = args.name or get_default_profile().name
         path = str(get_profiles_dir() / f"{name}.yaml")
         if Path(path).exists():
             print(Path(path).read_text())
+        elif is_default_profile_name(name):
+            import yaml
+
+            profile = get_default_profile()
+            data = profile_to_data(profile)
+            print(yaml.dump(data, default_flow_style=False, sort_keys=False))
         else:
             print(f"Profile '{name}' not found. Run 'profile list' to see available profiles.")
 
 
 def cmd_ocr(args):
     """Read text from a screen region using OCR."""
+    pyautogui = _load_pyautogui("ocr")
+
     import keyboard
     from .vision import VisionEngine
 
-    pyautogui = _load_pyautogui()
     vision = VisionEngine()
 
     print("mousecoords -- OCR Reader")
@@ -409,16 +436,13 @@ def cmd_doctor(args):
 
 def cmd_watch(args):
     """Monitor a screen pixel for color changes."""
-    from .watcher import ScreenWatcher
-
-    pyautogui = None
     if args.pick:
         try:
             import keyboard
         except ImportError:
             print("keyboard module required for --pick. Run: mousecoords doctor")
             sys.exit(1)
-        pyautogui = _load_pyautogui()
+        pyautogui = _load_pyautogui("watch")
         print("mousecoords -- Screen Watcher")
         print("Position mouse at the pixel to watch, press SPACE")
         keyboard.wait("space")
@@ -431,6 +455,8 @@ def cmd_watch(args):
         print("Or use --pick to select with your mouse.")
         sys.exit(1)
 
+    _load_pyautogui("watch")
+    from .watcher import ScreenWatcher
     watcher = ScreenWatcher(
         x=x, y=y,
         threshold=args.threshold,

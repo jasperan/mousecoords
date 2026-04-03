@@ -6,7 +6,7 @@ from pathlib import Path
 from mousecoords.config import (
     Profile, ButtonConfig, StateConfig,
     load_profile, save_profile, list_profiles,
-    get_profiles_dir, get_default_profile,
+    get_profiles_dir, get_default_profile, DEFAULT_PROFILE_NAME,
 )
 
 
@@ -90,6 +90,11 @@ class TestListProfiles:
     def test_list_profiles_finds_yaml(self):
         profiles = list_profiles()
         assert "antimatter_dimensions" in profiles
+
+    def test_list_profiles_includes_builtin_default_when_dir_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("mousecoords.config.get_profiles_dir", lambda: tmp_path / "missing")
+        profiles = list_profiles()
+        assert profiles == [DEFAULT_PROFILE_NAME]
 
     def test_profiles_dir_exists(self):
         d = get_profiles_dir()

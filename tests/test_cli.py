@@ -90,6 +90,13 @@ class TestProfileCommand:
         captured = capsys.readouterr()
         assert "antimatter_dimensions" in captured.out.lower() or "Antimatter" in captured.out
 
+    def test_profile_show_builtin_default_without_profiles_dir(self, capsys, tmp_path):
+        with patch("mousecoords.config.get_profiles_dir", return_value=tmp_path):
+            with patch("sys.argv", ["mousecoords", "profile", "show"]):
+                main()
+        captured = capsys.readouterr()
+        assert "antimatter_dimensions" in captured.out.lower()
+
     def test_profile_show_missing(self, capsys):
         with patch("sys.argv", ["mousecoords", "profile", "show", "-n", "nonexistent_xyz"]):
             main()
@@ -110,6 +117,38 @@ class TestWatchCommand:
         with patch("sys.argv", ["mousecoords", "watch"]):
             with pytest.raises(SystemExit):
                 main()
+
+    def test_watch_no_coords_subprocess_headless(self):
+        """Watch should validate arguments before importing GUI code."""
+        env = os.environ.copy()
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        result = subprocess.run(
+            [sys.executable, "-m", "mousecoords", "watch"],
+            cwd=os.getcwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "Specify coordinates" in result.stdout
+        assert "Traceback" not in result.stderr
+
+    def test_watch_with_coords_subprocess_headless(self):
+        """GUI-dependent watch mode should fail cleanly when no display is available."""
+        env = os.environ.copy()
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        result = subprocess.run(
+            [sys.executable, "-m", "mousecoords", "watch", "-x", "0", "-y", "0"],
+            cwd=os.getcwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "requires an active graphical session" in result.stdout
+        assert "Traceback" not in result.stderr
 
 
 class TestMainModuleEntry:
