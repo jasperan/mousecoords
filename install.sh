@@ -86,7 +86,9 @@ install_deps() {
     source .venv/bin/activate
 
     info "Installing dependencies..."
-    pip install --upgrade pip setuptools wheel -q
+    if ! pip install --upgrade pip setuptools wheel -q; then
+        warn "Could not upgrade pip/setuptools/wheel; continuing with bundled versions."
+    fi
     pip install --no-build-isolation ".[all]" -q
     success "Package and dependencies installed"
 }
