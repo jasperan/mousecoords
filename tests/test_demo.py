@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from pathlib import Path
 
 import pytest
 
@@ -150,3 +149,39 @@ def test_demo_smoke_can_emit_debug_bundle(tmp_path):
     bundle_payload = json.loads(inspect.stdout)
     assert bundle_payload["manifest"]["profile"] in {"desktop_demo", "demo_lab"}
     assert "summary.json" in bundle_payload["files"]
+
+
+@pytest.mark.skipif(XVFB_RUN is None, reason="xvfb-run not available")
+def test_profile_inspect_detects_demo_buttons_end_to_end(tmp_path):
+    env = os.environ.copy()
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+    state_file = tmp_path / "state.json"
+    ready_file = tmp_path / "ready.txt"
+
+    command = f"""
+set -e
+python -m mousecoords demo launch --state-file "{state_file}" --ready-file "{ready_file}" --duration 3 &
+demo_pid=$!
+for _ in $(seq 1 60); do
+  [ -f "{ready_file}" ] && break
+  sleep 0.05
+done
+[ -f "{ready_file}" ]
+python -m mousecoords profile inspect profiles/desktop_demo --json --require-all
+wait "$demo_pid" || true
+"""
+    result = subprocess.run(
+        [XVFB_RUN, "-a", "bash", "-lc", command],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["detected_count"] == payload["button_count"] == 3
+    assert {button["name"] for button in payload["buttons"]} == {"Harvest", "Boost", "Reset"}

@@ -448,6 +448,77 @@ def cmd_profile(args):
         else:
             print(f"Profile '{name}' not found. Run 'profile list' to see available profiles.")
 
+    elif args.action == "inspect":
+        target = args.name or args.target or args.path or get_default_profile().name
+        try:
+            profile, resolved_path = _resolve_profile(target)
+        except Exception as exc:
+            payload = {
+                "profile_name": target,
+                "source": str(target),
+                "ok": False,
+                "issues": [
+                    {
+                        "level": "error",
+                        "code": "profile_load_failed",
+                        "message": str(exc),
+                    }
+                ],
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Profile '{target}' could not be loaded:")
+                print(f"  - [error] profile_load_failed: {exc}")
+            raise SystemExit(1)
+
+        _load_pyautogui("profile inspect")
+        from .inspector import inspect_profile
+
+        payload = inspect_profile(
+            profile=profile,
+            profile_path=resolved_path,
+            confidence=args.confidence,
+            include_ocr=args.ocr,
+        )
+        if args.json:
+            _print_json(payload)
+        else:
+            print(f"Profile inspection: {payload['profile_name']}")
+            print(f"  Source: {payload['source']}")
+            print(f"  Buttons detected: {payload['detected_count']}/{payload['button_count']}")
+            for button in payload["buttons"]:
+                marker = "+" if button["detected"] else "-"
+                if button["detector"] == "color":
+                    print(
+                        f"  [{marker}] {button['name']}: color @ "
+                        f"({button['click_point']['x']}, {button['click_point']['y']}) "
+                        f"expected RGB{tuple(button['expected_color'])} "
+                        f"actual RGB{tuple(button['actual_color'])}"
+                    )
+                else:
+                    resolved = button.get("resolved_template") or button.get("template")
+                    location = button.get("match_bounds")
+                    where = ""
+                    if location:
+                        where = (
+                            f" -> ({location['x']}, {location['y']}, "
+                            f"{location['width']}x{location['height']})"
+                        )
+                    print(f"  [{marker}] {button['name']}: template {resolved}{where}")
+                    if button.get("error"):
+                        print(f"      error: {button['error']}")
+            if args.ocr and payload["ocr"]:
+                print("  OCR:")
+                for name, info in payload["ocr"].items():
+                    print(
+                        f"    - {name}: text={info['text']!r} "
+                        f"number={info['number']!r} region={tuple(info['region'])}"
+                    )
+
+        if args.require_all and not payload["ok"]:
+            raise SystemExit(1)
+
 
 def cmd_studio_new(args):
     """Create a minimal profile-pack scaffold."""
@@ -683,11 +754,14 @@ def main():
 
     # profile
     p_prof = sub.add_parser("profile", help="Manage automation profiles")
-    p_prof.add_argument("action", choices=["list", "create", "show", "validate"])
+    p_prof.add_argument("action", choices=["list", "create", "show", "validate", "inspect"])
     p_prof.add_argument("target", nargs="?", help="Profile name or YAML path")
     p_prof.add_argument("-n", "--name", help="Profile name")
-    p_prof.add_argument("--path", help="Explicit profile path to validate")
-    p_prof.add_argument("--json", action="store_true", help="Print structured JSON validation output")
+    p_prof.add_argument("--path", help="Explicit profile path to validate or inspect")
+    p_prof.add_argument("--json", action="store_true", help="Print structured JSON output")
+    p_prof.add_argument("--ocr", action="store_true", help="Read OCR regions during profile inspection")
+    p_prof.add_argument("--confidence", type=float, default=0.8, help="Template-match confidence for profile inspection")
+    p_prof.add_argument("--require-all", action="store_true", help="Exit non-zero when profile inspection misses any buttons")
 
     # ocr
     sub.add_parser("ocr", help="Read text from screen region via OCR")

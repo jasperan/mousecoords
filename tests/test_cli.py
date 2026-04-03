@@ -180,6 +180,36 @@ class TestProfileCommand:
         assert payload["ok"] is False
         assert payload["issues"][0]["code"] == "profile_load_failed"
 
+    def test_profile_inspect_json(self, capsys):
+        payload = {
+            "profile_name": "demo",
+            "source": "demo",
+            "button_count": 1,
+            "detected_count": 1,
+            "ok": True,
+            "buttons": [],
+            "ocr": {},
+        }
+        with patch("mousecoords.automator._load_pyautogui"):
+            with patch("mousecoords.automator._resolve_profile") as mock_resolve:
+                mock_resolve.return_value = (object(), "demo.yaml")
+                with patch("mousecoords.inspector.inspect_profile", return_value=payload):
+                    with patch("sys.argv", ["mousecoords", "profile", "inspect", "demo", "--json"]):
+                        main()
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert result["ok"] is True
+        assert result["detected_count"] == 1
+
+    def test_profile_inspect_missing_profile_exits_cleanly(self, capsys):
+        with patch("sys.argv", ["mousecoords", "profile", "inspect", "missing-profile.yaml", "--json"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exc_info.value.code == 1
+        assert payload["issues"][0]["code"] == "profile_load_failed"
+
 
 class TestRunCommand:
     def test_run_dispatches_to_shared_command(self):

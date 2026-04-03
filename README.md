@@ -35,8 +35,14 @@ python -m mousecoords bundle inspect bundles/run-*.zip --json
 If you want to drive the demo in separate steps, this works too:
 
 ```bash
-xvfb-run -a python -m mousecoords demo launch --state-file /tmp/mousecoords-demo.json
-python -m mousecoords run -p profiles/desktop_demo --once --json
+xvfb-run -a bash -lc '
+  python -m mousecoords demo launch --state-file /tmp/mousecoords-demo.json --duration 3 &
+  demo_pid=$!
+  sleep 0.5
+  python -m mousecoords profile inspect profiles/desktop_demo --json --require-all
+  python -m mousecoords run -p profiles/desktop_demo --once --json
+  wait "$demo_pid" || true
+'
 cat /tmp/mousecoords-demo.json
 ```
 
@@ -168,10 +174,13 @@ mousecoords profile create     # generate default YAML
 mousecoords profile show       # display profile contents
 mousecoords profile validate   # validate the default/built-in profile
 mousecoords profile validate my_game.yaml --json
+mousecoords profile inspect my_game.yaml --json    # detect targets without clicking
 ```
 
 Validation catches broken template paths, bad state references, duplicate button/state
 names, invalid OCR regions, and malformed button metadata before you start a run.
+Inspection adds a live screen preflight so you can confirm what mousecoords sees before
+you allow a real automation run.
 
 ### Studio scaffold
 
