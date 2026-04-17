@@ -4,16 +4,16 @@ GUI automation toolkit with computer vision, macro recording, and game automatio
 
 What started as a 5-line coordinate grabber is now a full automation platform:
 
-- **Computer Vision** — find buttons by template matching (OpenCV), not hardcoded pixels
-- **OCR** — read numbers and text from the screen with Tesseract
-- **Macro Record/Replay** — record mouse and keyboard, save as JSON, replay at any speed
-- **Safe Run Mode** — dry-run profiles, bound runs by duration, and emit JSON summaries
-- **Debug Bundles** — capture manifests, stats, doctor output, and screenshots for bug reports
-- **Studio Scaffolds** — bootstrap profile-pack directories that are ready for templates and reference captures
-- **Visual Overlay** — transparent HUD with crosshair, button markers, and status
-- **State Machine** — structured game automation with named phases and transitions
-- **Rich Dashboard** — live terminal UI with stats, event log, and button status
-- **YAML Profiles** — resolution-independent, shareable configuration
+- **Computer Vision** (find buttons by template matching with OpenCV, not hardcoded pixels)
+- **OCR** (read numbers and text from the screen with Tesseract)
+- **Macro Record/Replay** (record mouse and keyboard, save as JSON, replay at any speed)
+- **Safe Run Mode** (dry-run profiles, bound runs by duration, and emit JSON summaries)
+- **Debug Bundles** (capture manifests, stats, doctor output, and screenshots for bug reports)
+- **Studio Scaffolds** (bootstrap profile-pack directories that are ready for templates and reference captures)
+- **Visual Overlay** (transparent HUD with crosshair, button markers, and status)
+- **State Machine** (structured game automation with named phases and transitions)
+- **Rich Dashboard** (live terminal UI with stats, event log, and button status)
+- **YAML Profiles** (resolution-independent, shareable configuration)
 
 ## Quick proof it works
 
@@ -50,7 +50,7 @@ cat /tmp/mousecoords-demo.json
 ## Installation
 
 <!-- one-command-install -->
-> **One-command install** — clone, configure, and run in a single step:
+> **One-command install** (clone, configure, and run in a single step):
 >
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/jasperan/mousecoords/main/install.sh | bash
@@ -89,7 +89,7 @@ For OCR, also install Tesseract system-wide:
 sudo apt install tesseract-ocr
 # macOS
 brew install tesseract
-# Windows — download from https://github.com/UB-Mannheim/tesseract/wiki
+# Windows: download from https://github.com/UB-Mannheim/tesseract/wiki
 ```
 
 ## Usage
@@ -275,8 +275,8 @@ mousecoords/
 
 The original scripts are preserved at the repo root:
 
-- `coords.py` — the original 5-line coordinate grabber
-- `dimension_mini.py` — the original Antimatter Dimensions automator (Windows-only)
+- `coords.py`: the original 5-line coordinate grabber
+- `dimension_mini.py`: the original Antimatter Dimensions automator (Windows-only)
 
 ## License
 

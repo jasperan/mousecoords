@@ -170,6 +170,7 @@ recordings/*.json
 bundles/
 docs/plans/
 dogfood-output/
+content/
 task_plan.md
 findings.md
 progress.md
