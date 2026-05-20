@@ -39,3 +39,5 @@ include = ["mousecoords*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
