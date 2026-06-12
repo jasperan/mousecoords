@@ -233,11 +233,6 @@ def launch_demo_app(
             write_demo_state(state_file, state)
 
 
-def run_demo_app(**kwargs):
-    """Backward-compatible alias for older callers."""
-    launch_demo_app(**kwargs)
-
-
 def _wait_for_file(path: Path, timeout: float = 5.0) -> bool:
     """Wait until a file exists or the timeout elapses."""
     deadline = time.time() + timeout

@@ -28,6 +28,12 @@ def capture_screen(region: Optional[tuple] = None):
     return pyautogui.screenshot(region=region)
 
 
-def capture_screenshot(region: Optional[tuple] = None):
-    """Backward-compatible alias for older in-progress refactors."""
-    return capture_screen(region=region)
+def get_pixel_color(x: int, y: int) -> tuple:
+    """Get the RGB color at a screen coordinate. Works on any OS."""
+    img = capture_screen(region=(x, y, 1, 1))
+    return img.getpixel((0, 0))[:3]
+
+
+def color_matches(color1: tuple, color2: tuple, tolerance: int) -> bool:
+    """Check whether two RGB colors match within a per-channel tolerance."""
+    return all(abs(a - b) <= tolerance for a, b in zip(color1, color2))

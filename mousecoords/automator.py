@@ -180,6 +180,36 @@ def _print_json(payload: dict):
     print(json.dumps(payload, indent=2, sort_keys=False))
 
 
+def _profile_target(args) -> str:
+    """Resolve the profile target shared by `validate` and `inspect`."""
+    return args.name or args.target or args.path or get_default_profile().name
+
+
+def _load_profile_or_fail(target: str, json_mode: bool):
+    """Load a profile or print a `profile_load_failed` payload and exit non-zero."""
+    try:
+        return _resolve_profile(target)
+    except Exception as exc:
+        payload = {
+            "profile_name": target,
+            "source": str(target),
+            "ok": False,
+            "issues": [
+                {
+                    "level": "error",
+                    "code": "profile_load_failed",
+                    "message": str(exc),
+                }
+            ],
+        }
+        if json_mode:
+            _print_json(payload)
+        else:
+            print(f"Profile '{target}' could not be loaded:")
+            print(f"  - [error] profile_load_failed: {exc}")
+        raise SystemExit(1)
+
+
 def _maybe_create_bundle(args, profile, result):
     if not getattr(args, "debug", False) and not getattr(args, "bundle_dir", None):
         return None
@@ -215,6 +245,7 @@ def _run_command(args, *, command_name: str, mode_label: str):
         pyautogui=pyautogui,
         shutdown_event=_shutdown,
         mode=mode_label,
+        command=command_name,
         overlay_enabled=args.overlay,
         ocr_enabled=args.ocr,
         simple=args.simple,
@@ -280,28 +311,8 @@ def cmd_bundle(args):
 
 def cmd_profile_validate(args):
     """Validate a profile and report actionable issues."""
-    target = args.name or args.target or args.path or get_default_profile().name
-    try:
-        profile, resolved_path = _resolve_profile(target)
-    except Exception as exc:
-        payload = {
-            "profile_name": target,
-            "source": str(target),
-            "ok": False,
-            "issues": [
-                {
-                    "level": "error",
-                    "code": "profile_load_failed",
-                    "message": str(exc),
-                }
-            ],
-        }
-        if args.json:
-            _print_json(payload)
-        else:
-            print(f"Profile '{target}' could not be loaded:")
-            print(f"  - [error] profile_load_failed: {exc}")
-        raise SystemExit(1)
+    target = _profile_target(args)
+    profile, resolved_path = _load_profile_or_fail(target, args.json)
 
     validation = validate_profile(profile, profile_path=resolved_path)
     payload = validation.to_dict()
@@ -318,11 +329,6 @@ def cmd_profile_validate(args):
     for issue in validation.issues:
         print(f"  - [{issue.level}] {issue.code}: {issue.message}")
     raise SystemExit(1)
-
-
-def cmd_automate_legacy(args):
-    """Compatibility wrapper retained for existing users."""
-    cmd_automate(args)
 
 
 def cmd_record(args):
@@ -448,29 +454,13 @@ def cmd_profile(args):
         else:
             print(f"Profile '{name}' not found. Run 'profile list' to see available profiles.")
 
+    elif args.action == "validate":
+        cmd_profile_validate(args)
+        return
+
     elif args.action == "inspect":
-        target = args.name or args.target or args.path or get_default_profile().name
-        try:
-            profile, resolved_path = _resolve_profile(target)
-        except Exception as exc:
-            payload = {
-                "profile_name": target,
-                "source": str(target),
-                "ok": False,
-                "issues": [
-                    {
-                        "level": "error",
-                        "code": "profile_load_failed",
-                        "message": str(exc),
-                    }
-                ],
-            }
-            if args.json:
-                _print_json(payload)
-            else:
-                print(f"Profile '{target}' could not be loaded:")
-                print(f"  - [error] profile_load_failed: {exc}")
-            raise SystemExit(1)
+        target = _profile_target(args)
+        profile, resolved_path = _load_profile_or_fail(target, args.json)
 
         _load_pyautogui("profile inspect")
         from .inspector import inspect_profile
@@ -696,6 +686,22 @@ def cmd_watch(args):
 # CLI
 # ======================================================================
 
+def _add_run_arguments(parser: argparse.ArgumentParser):
+    """Register the shared arguments used by the `run` and `automate` subcommands."""
+    parser.add_argument("-p", "--profile", help="Profile name or YAML path")
+    parser.add_argument("--overlay", action="store_true", help="Show visual overlay")
+    parser.add_argument("--ocr", action="store_true", help="Enable OCR reading")
+    parser.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
+    parser.add_argument("--dry-run", action="store_true", help="Detect actions without clicking")
+    parser.add_argument("--once", action="store_true", help="Run a single automation cycle")
+    parser.add_argument("--duration", type=float, default=None, help="Stop after N seconds")
+    parser.add_argument("--json", action="store_true", help="Print structured JSON summary")
+    parser.add_argument("--debug", action="store_true", help="Export a debug bundle after the run")
+    parser.add_argument("--bundle-dir", help="Directory for exported debug bundles")
+    parser.add_argument("--no-failsafe", action="store_true",
+                        help="Disable pyautogui corner failsafe")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="mousecoords",
@@ -708,33 +714,11 @@ def main():
 
     # automate
     p_auto = sub.add_parser("automate", help="Run game automation")
-    p_auto.add_argument("-p", "--profile", help="Profile name or YAML path")
-    p_auto.add_argument("--overlay", action="store_true", help="Show visual overlay")
-    p_auto.add_argument("--ocr", action="store_true", help="Enable OCR reading")
-    p_auto.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
-    p_auto.add_argument("--dry-run", action="store_true", help="Detect actions without clicking")
-    p_auto.add_argument("--once", action="store_true", help="Run a single automation cycle")
-    p_auto.add_argument("--duration", type=float, default=None, help="Stop after N seconds")
-    p_auto.add_argument("--json", action="store_true", help="Print structured JSON summary")
-    p_auto.add_argument("--debug", action="store_true", help="Export a debug bundle after the run")
-    p_auto.add_argument("--bundle-dir", help="Directory for exported debug bundles")
-    p_auto.add_argument("--no-failsafe", action="store_true",
-                        help="Disable pyautogui corner failsafe")
+    _add_run_arguments(p_auto)
 
     # run
     p_run = sub.add_parser("run", help="Run automation with safer execution controls")
-    p_run.add_argument("-p", "--profile", help="Profile name or YAML path")
-    p_run.add_argument("--overlay", action="store_true", help="Show visual overlay")
-    p_run.add_argument("--ocr", action="store_true", help="Enable OCR reading")
-    p_run.add_argument("--simple", action="store_true", help="Plain output (no Rich)")
-    p_run.add_argument("--dry-run", action="store_true", help="Detect actions without clicking")
-    p_run.add_argument("--once", action="store_true", help="Run a single automation cycle")
-    p_run.add_argument("--duration", type=float, default=None, help="Stop after N seconds")
-    p_run.add_argument("--json", action="store_true", help="Print structured JSON summary")
-    p_run.add_argument("--debug", action="store_true", help="Export a debug bundle after the run")
-    p_run.add_argument("--bundle-dir", help="Directory for exported debug bundles")
-    p_run.add_argument("--no-failsafe", action="store_true",
-                       help="Disable pyautogui corner failsafe")
+    _add_run_arguments(p_run)
 
     # record
     p_rec = sub.add_parser("record", help="Record a macro")
@@ -820,7 +804,7 @@ def main():
 
     commands = {
         "coords": cmd_coords,
-        "automate": cmd_automate_legacy,
+        "automate": cmd_automate,
         "run": cmd_run,
         "record": cmd_record,
         "play": cmd_play,
@@ -845,10 +829,7 @@ def main():
         return
 
     if args.command in commands:
-        if args.command == "profile" and args.action == "validate":
-            cmd_profile_validate(args)
-        else:
-            commands[args.command](args)
+        commands[args.command](args)
     else:
         parser.print_help()
 

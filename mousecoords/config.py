@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import yaml
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 from pathlib import Path
 
@@ -73,18 +73,10 @@ class Profile:
         sx = target_w / src_w
         sy = target_h / src_h
 
-        scaled_buttons = []
-        for b in self.buttons:
-            scaled_buttons.append(ButtonConfig(
-                name=b.name,
-                x=int(b.x * sx),
-                y=int(b.y * sy),
-                color=b.color,
-                action=b.action,
-                cooldown=b.cooldown,
-                template=b.template,
-                priority=b.priority,
-            ))
+        scaled_buttons = [
+            replace(b, x=int(b.x * sx), y=int(b.y * sy))
+            for b in self.buttons
+        ]
 
         scaled_ocr = {}
         for key, (rx, ry, rw, rh) in self.ocr_regions.items():
@@ -272,47 +264,6 @@ def get_demo_profile() -> Profile:
         ],
         ocr_regions={},
     )
-
-
-def resolve_profile_reference(reference: Optional[str] = None) -> tuple[Profile, str]:
-    """Resolve a profile name/path into a loaded profile and source label."""
-    if reference:
-        explicit_path = Path(reference)
-        if explicit_path.exists():
-            if explicit_path.is_dir():
-                pack_path = _pack_profile_path(explicit_path)
-                if not pack_path.exists():
-                    raise FileNotFoundError(
-                        f"Profile directory '{explicit_path}' does not contain {pack_path.name}."
-                    )
-                return load_profile(str(pack_path)), str(pack_path)
-            return load_profile(str(explicit_path)), str(explicit_path)
-
-        named_path = None
-        if explicit_path.suffix != ".yaml":
-            named_path = get_profiles_dir() / f"{reference}.yaml"
-            if named_path.exists():
-                return load_profile(str(named_path)), str(named_path)
-
-        pack_path = _pack_profile_path(get_profiles_dir() / reference)
-        if pack_path.exists():
-            return load_profile(str(pack_path)), str(pack_path)
-
-        if is_default_profile_name(reference):
-            return get_default_profile(), f"builtin:{reference}"
-        if is_demo_profile_name(reference):
-            return get_demo_profile(), f"builtin:{reference}"
-
-        expected = named_path if named_path is not None else explicit_path
-        raise FileNotFoundError(
-            f"Profile '{reference}' not found. Run 'mousecoords profile list' or provide {expected}."
-        )
-
-    default_name = get_default_profile().name
-    default_path = get_profiles_dir() / f"{default_name}.yaml"
-    if default_path.exists():
-        return load_profile(str(default_path)), str(default_path)
-    return get_default_profile(), f"builtin:{default_name}"
 
 
 def is_default_profile_name(name: str) -> bool:

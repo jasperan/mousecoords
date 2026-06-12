@@ -194,14 +194,3 @@ class Dashboard:
             title="[bold blue]mousecoords v2.0[/bold blue]",
             border_style="blue", box=box.DOUBLE,
         )
-
-    # ------------------------------------------------------------------
-    # Fallback for environments without Rich
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def print_fallback(stats: dict, log_msg: str = ""):
-        ts = datetime.now().strftime("%H:%M:%S")
-        parts = " | ".join(f"{k}: {v}" for k, v in stats.items())
-        suffix = f"  {log_msg}" if log_msg else ""
-        print(f"[{ts}] {parts}{suffix}")

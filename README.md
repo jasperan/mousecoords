@@ -263,9 +263,14 @@ mousecoords/
 ├── runtime.py         # shared run/automate execution engine
 ├── bundles.py         # debug bundle export + inspection
 ├── vision.py          # OpenCV template matching + Tesseract OCR
+├── screen.py          # screenshot + pixel-color helpers (Pillow/pyautogui)
 ├── recorder.py        # Input recording and replay engine
 ├── overlay.py         # Transparent tkinter HUD overlay
 ├── studio.py          # profile-pack scaffold creation
+├── demo.py            # deterministic demo target + end-to-end smoke run
+├── inspector.py       # live profile preflight (what automation sees)
+├── doctor.py          # environment diagnostics
+├── watcher.py         # live pixel/region color-change watcher
 ├── state_machine.py   # FSM with phases, limits, and transitions
 ├── tui.py             # Rich live dashboard
 └── automator.py       # CLI entry point orchestrating everything

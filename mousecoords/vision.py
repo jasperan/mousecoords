@@ -6,7 +6,7 @@ import re
 from typing import Optional
 from pathlib import Path
 
-from .screen import capture_screen
+from .screen import capture_screen, color_matches, get_pixel_color
 
 try:
     import numpy as np
@@ -50,15 +50,13 @@ class VisionEngine:
 
     def get_pixel_color(self, x: int, y: int) -> tuple:
         """Get RGB color at screen coordinates. Works on any OS."""
-        img = capture_screen(region=(x, y, 1, 1))
-        pixel = img.getpixel((0, 0))
-        return pixel[:3]
+        return get_pixel_color(x, y)
 
     def color_matches(self, color1: tuple, color2: tuple,
                       tolerance: Optional[int] = None) -> bool:
         """Check if two RGB colors match within tolerance."""
         tol = tolerance if tolerance is not None else self.color_tolerance
-        return all(abs(a - b) <= tol for a, b in zip(color1, color2))
+        return color_matches(color1, color2, tol)
 
     # ------------------------------------------------------------------
     # Template matching

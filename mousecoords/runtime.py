@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
 from threading import Event as ThreadEvent, Thread
@@ -106,6 +107,7 @@ def run_automation_session(
     pyautogui,
     shutdown_event: ThreadEvent,
     mode: str,
+    command: str | None = None,
     overlay_enabled: bool = False,
     ocr_enabled: bool = False,
     simple: bool = False,
@@ -116,8 +118,11 @@ def run_automation_session(
 ) -> RunResult:
     """Run the main automation loop and return a structured summary."""
 
+    if command is None:
+        command = "run" if mode == "Automation Run" else "automate"
+
     summary = RunResult(
-        command="run" if mode == "Automation Run" else "automate",
+        command=command,
         mode=mode,
         profile=profile.name,
         dry_run=dry_run,
@@ -129,30 +134,24 @@ def run_automation_session(
     overlay = None
     ocr_data: dict[str, float] = {}
 
+    # kind -> (dashboard method name, plain-output prefix)
+    emit_kinds = {
+        "action": ("log_action", "[ACTION]"),
+        "error": ("log_error", "[ERROR]"),
+        "warning": ("log_warning", "[WARN]"),
+        "state": ("log_state", "[STATE]"),
+        "info": ("log_info", ""),
+    }
+
     def emit(message: str, *, kind: str = "info"):
         if not render_output:
             return
 
+        method_name, prefix = emit_kinds.get(kind, emit_kinds["info"])
         if dashboard:
-            if kind == "action":
-                dashboard.log_action(message)
-            elif kind == "error":
-                dashboard.log_error(message)
-            elif kind == "warning":
-                dashboard.log_warning(message)
-            elif kind == "state":
-                dashboard.log_state(message)
-            else:
-                dashboard.log_info(message)
+            getattr(dashboard, method_name)(message)
             return
 
-        prefix_map = {
-            "action": "[ACTION]",
-            "error": "[ERROR]",
-            "warning": "[WARN]",
-            "state": "[STATE]",
-        }
-        prefix = prefix_map.get(kind, "")
         print(f"{prefix} {message}".strip())
 
     if render_output and HAS_RICH and not simple:
@@ -182,7 +181,7 @@ def run_automation_session(
                     value = vision.read_number(region)
                     if value is not None:
                         ocr_data[name] = value
-                time.sleep(2)
+                shutdown_event.wait(2)
 
         Thread(target=ocr_loop, daemon=True).start()
 
@@ -276,18 +275,8 @@ def run_automation_session(
 
             update_dashboard_stats()
 
-        if dashboard:
-            live = dashboard.start()
-            with live:
-                while not shutdown_event.is_set():
-                    if deadline and time.time() >= deadline:
-                        break
-                    run_cycle()
-                    if once:
-                        break
-                    time.sleep(profile.poll_interval)
-            dashboard.stop()
-        else:
+        live = dashboard.start() if dashboard else contextlib.nullcontext()
+        with live:
             while not shutdown_event.is_set():
                 if deadline and time.time() >= deadline:
                     break
@@ -295,6 +284,8 @@ def run_automation_session(
                 if once:
                     break
                 time.sleep(profile.poll_interval)
+        if dashboard:
+            dashboard.stop()
 
     except KeyboardInterrupt:
         pass
